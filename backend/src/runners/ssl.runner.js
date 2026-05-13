@@ -3,6 +3,8 @@
 import sslChecker from 'ssl-checker';
 import { RESULT_STATUS } from '../../../shared/constants.js';
 
+const SSL_TIMEOUT_MS = 10_000;
+
 export async function runSslCheck({ url } = {}) {
   try {
     const parsed = new URL(url);
@@ -19,7 +21,17 @@ export async function runSslCheck({ url } = {}) {
     }
 
     const port = parsed.port ? Number(parsed.port) : 443;
-    const info = await sslChecker(parsed.hostname, { method: 'GET', port });
+    // ssl-checker no tiene timeout propio — si el handshake TLS cuelga, espera
+    // infinito. Wrappeamos con Promise.race para abortar a los 10s.
+    const info = await Promise.race([
+      sslChecker(parsed.hostname, { method: 'GET', port }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`SSL check timeout (${SSL_TIMEOUT_MS}ms) para ${parsed.hostname}:${port}`)),
+          SSL_TIMEOUT_MS,
+        ),
+      ),
+    ]);
 
     // info: { valid, validFrom, validTo, daysRemaining, validFor }
     let status;
