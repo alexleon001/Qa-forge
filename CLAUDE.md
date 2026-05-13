@@ -202,8 +202,9 @@ ninguna de esas cosas, por eso el split.
 
 ## Estado actual
 
-> **Última fase completada:** FASE 6 + Deploy prod + Mejoras UX + Roadmap FASE 7
-> **Última sesión:** 2026-05-13 (sesión maratónica: deploy, fixes críticos, prompts pro)
+> **Última fase completada:** FASE 7 pasos 1 (auth + API keys in-app) + 8 (mobile web)
+> **Última sesión:** 2026-05-13 (sesión maratónica: deploy + fixes críticos + FASE 7 parcial)
+> **Producción**: https://qaforge-chi.vercel.app — con auth funcional + admin creado
 >
 > **Audiencia**: uso personal del owner + equipo chico de QA. **No comercial** (por ahora).
 > Si en el futuro pivota a vender: ver [[project-future-auth-apikeys]] y el roadmap de FASE 7
@@ -431,13 +432,45 @@ ninguna de esas cosas, por eso el split.
 > con su equipo de QA. **NO comercial** por ahora — evitar over-engineering enterprise.
 > Ver memoria [[project-audience-personal-use]] para detalles.
 
-**Fase 7 (próxima — ~3-4 sem)** — compartible con el equipo:
-1. **Auth simple** (user/pass + JWT) — sin orgs, sin RBAC complejo
-2. **API keys in-app** por usuario (Gemini/OpenAI/Anthropic/OpenRouter/Ollama)
-   encriptadas en DB con AES-GCM (SECRET_ENCRYPTION_KEY env)
-3. **Mobile web** — viewport switcher (desktop/tablet/iPhone/Android) en cada scan
-4. **Login pre-flight** — form fill + cookies guardadas para scanear áreas privadas
-5. **Crawler multi-página** — sitemap.xml o depth-N
+**Fase 7 — compartible con el equipo:**
+
+✅ **7.1 Auth simple** (user/pass + JWT) — **implementado 2026-05-13** (commit `f9a98c7`)
+  - Schema: `User` (email/passwordHash/name/role) + `UserApiKey` + `Scan.userId`
+  - Helpers: `backend/src/auth/{crypto.js,jwt.js}` — AES-256-GCM + bcrypt + JWT
+  - Endpoints `/api/auth/register|login|me`, middleware `attachUser`+`requireAuth`
+  - Primer user registrado = admin automático
+  - Flag `ALLOW_REGISTRATION` para cerrar registros
+  - Frontend: vistas `/login` `/register`, `useAuthStore` con localStorage,
+    interceptor axios, RequireAuth wrapper, NavBar dinámico
+
+✅ **7.2 API keys in-app** por usuario — **implementado 2026-05-13** (mismo commit)
+  - Keys cifradas AES-256-GCM en `UserApiKey.encryptedKey` (con `SECRET_ENCRYPTION_KEY`)
+  - `hint` visible (4 primeros + 4 últimos chars) para identificar
+  - Una key default por (user, provider)
+  - CRUD endpoints `/api/user/api-keys` + PATCH `/default`
+  - `resolveProvider({ requestedId, userId })` usa key del user primero, fallback al env
+  - Vista `/settings/api-keys` con form + listado + marcar default + borrar
+
+✅ **7.8 Mobile web** — viewport switcher — **implementado 2026-05-13** (commit `d19ac62`)
+  - 6 perfiles: desktop, desktop-1080p, tablet (iPad Pro 11), iPhone 13, iPhone 15 Pro, Pixel 7
+  - `DEVICE_PROFILES` en `shared/constants.js` con mapeo a Playwright `devices[X]`
+  - Scan.deviceProfile en DB, propagado a playwright/accessibility/pagespeed runners
+  - PageSpeed strategy auto-deriva (mobile profiles → mobile, desktop profiles → desktop)
+  - Frontend: grid de 6 botones en Home con emoji icons + badge en Dashboard/Report
+
+⬜ **7.4 Login pre-flight** — pendiente (próxima sesión)
+  - Form fill + cookies guardadas para scanear áreas privadas
+  - Schema sugerido: `Scan.loginConfig` JSON con `{ url, usernameSelector, passwordSelector,
+    username, password, submitSelector, postLoginUrl? }`
+  - Antes del playwright.capture, navegar a loginConfig.url, rellenar credenciales,
+    submit, esperar postLoginUrl. Persistir cookies y reusarlas en runners siguientes.
+  - UI: campo expandible "Scan con autenticación" en Home con los selectors
+
+⬜ **7.5 Crawler multi-página** — pendiente (próxima sesión)
+  - Opción `mode: single | crawl` + `maxPages` (default 1, max 10-20)
+  - Descubrir URLs via sitemap.xml O fallback a links internos del capture
+  - Decisión pendiente: scans hijos en DB (parent-child) o un solo scan con results múltiples
+  - Refactor más grande de la queue — mejor en sesión dedicada
 
 **Fase 8 (~4-6 sem)** — profundidad y conexiones:
 6. Programación de scans (cron) + notificaciones Slack/email
