@@ -101,7 +101,11 @@ export function ManualCases() {
     } catch (err) {
       const status = err?.response?.status;
       const apiMsg = err?.response?.data?.message;
-      if (status === 503) {
+      if (status === 429) {
+        setError(apiMsg ?? 'Cuota del provider agotada. Probá con otro provider en el dropdown.');
+      } else if (status === 401) {
+        setError(apiMsg ?? 'API key inválida o sin permisos para este modelo.');
+      } else if (status === 503) {
         setError(
           apiMsg ??
             'Provider no configurado. Setear la API key correspondiente en backend/.env (o levantar Ollama).',

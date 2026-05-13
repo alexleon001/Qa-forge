@@ -42,6 +42,53 @@ function sanitizeSchemaForGemini(schema) {
   return out;
 }
 
+/** Normaliza errores del SDK de Gemini a mensajes claros para la UI. */
+function parseGeminiError(err) {
+  const raw = err?.message ?? String(err);
+  // El SDK serializa el body como {"error":{...}}.
+  let body = null;
+  const jsonStart = raw.indexOf('{');
+  if (jsonStart !== -1) {
+    try {
+      body = JSON.parse(raw.slice(jsonStart));
+    } catch {}
+  }
+  const apiError = body?.error;
+  const status = apiError?.code ?? err?.status ?? 502;
+  if (status === 429) {
+    const retryDelay =
+      apiError?.details?.find?.((d) => d['@type']?.includes('RetryInfo'))?.retryDelay;
+    return {
+      status: 429,
+      code: 'QUOTA_EXCEEDED',
+      message:
+        `Cuota de Gemini agotada. ${
+          retryDelay ? `Reintentar en ${retryDelay}. ` : ''
+        }Probá con otro provider (dropdown) o creá una nueva API key en https://aistudio.google.com/apikey (en un proyecto nuevo).`,
+    };
+  }
+  if (status === 401 || status === 403) {
+    return {
+      status: 401,
+      code: 'INVALID_API_KEY',
+      message:
+        'API key de Gemini inválida o sin permisos. Verificá GEMINI_API_KEY en Railway.',
+    };
+  }
+  if (status === 400 && /API key/i.test(apiError?.message ?? '')) {
+    return {
+      status: 401,
+      code: 'INVALID_API_KEY',
+      message: 'API key de Gemini inválida. Generá una nueva en aistudio.google.com/apikey.',
+    };
+  }
+  return {
+    status: status >= 400 && status < 600 ? status : 502,
+    code: 'PROVIDER_ERROR',
+    message: apiError?.message ?? raw.slice(0, 500),
+  };
+}
+
 export const geminiProvider = {
   id: PROVIDER_ID,
   label: 'Google Gemini',
@@ -85,8 +132,10 @@ export const geminiProvider = {
       };
     } catch (err) {
       if (err instanceof ProviderError) throw err;
-      throw new ProviderError(PROVIDER_ID, err?.message ?? String(err), {
-        status: err?.status ?? 502,
+      const friendly = parseGeminiError(err);
+      throw new ProviderError(PROVIDER_ID, friendly.message, {
+        status: friendly.status,
+        code: friendly.code,
         cause: err,
       });
     }
