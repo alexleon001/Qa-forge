@@ -3,7 +3,7 @@
 #
 # Imagen base: Playwright oficial sobre Ubuntu 22.04 (incluye Chromium + libs).
 # Añadimos Bun encima.
-FROM mcr.microsoft.com/playwright:v1.49.1-jammy
+FROM mcr.microsoft.com/playwright:v1.60.0-jammy
 
 ENV BUN_INSTALL=/usr/local
 RUN apt-get update \
