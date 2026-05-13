@@ -7,10 +7,12 @@ builder = "DOCKERFILE"
 dockerfilePath = "backend/Dockerfile"
 
 [deploy]
-startCommand = "bunx prisma db push --schema=src/db/schema.prisma --accept-data-loss --skip-generate && bun src/index.js"
+# Railway corre startCommand en exec form (sin shell), así que `&&` no se
+# interpreta. Separamos: la migración va en preDeployCommand, el server en
+# startCommand. preDeployCommand sí corre en shell.
+preDeployCommand = "bunx prisma db push --schema=src/db/schema.prisma --accept-data-loss --skip-generate"
+startCommand = "bun src/index.js"
 healthcheckPath = "/api/health"
-# 300s: el primer deploy hace prisma db push contra Postgres recién creado.
-# Despues de los primeros deploys es mucho más rápido (idempotente).
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
