@@ -84,9 +84,12 @@ export function ReportDetail() {
         <div>
           <p className="text-xs uppercase tracking-widest text-slate-500">reporte</p>
           <h1 className="text-3xl font-bold text-slate-50 break-all">{scan.url}</h1>
-          <p className="mt-1 text-xs text-slate-500">
-            ID: {scan.id} · Status: {scan.status}
-            {scan.completedAt ? ` · ${new Date(scan.completedAt).toLocaleString()}` : ''}
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span>ID: {scan.id} · Status: {scan.status}</span>
+            {scan.completedAt ? (
+              <span>· {new Date(scan.completedAt).toLocaleString()}</span>
+            ) : null}
+            <DeviceBadge report={report} />
           </p>
           {scanMeta?.startedAt ? (
             <p className="mt-1 flex items-center gap-2 text-xs text-slate-500">
@@ -162,6 +165,22 @@ export function ReportDetail() {
         />
       ))}
     </section>
+  );
+}
+
+function DeviceBadge({ report }) {
+  const capture = report?.byCategory?.functional?.find?.(
+    (r) => r.testName === 'playwright.capture',
+  );
+  const device = capture?.details?.device;
+  if (!device?.label) return null;
+  return (
+    <span
+      className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300"
+      title={`Viewport: ${device.viewport?.width}×${device.viewport?.height}`}
+    >
+      {device.isMobile ? '📱' : '🖥️'} {device.label}
+    </span>
   );
 }
 

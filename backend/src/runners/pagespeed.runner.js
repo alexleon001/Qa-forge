@@ -7,9 +7,14 @@ import { DEFAULTS, RESULT_STATUS } from '../../../shared/constants.js';
 const ENDPOINT = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 const CATEGORIES = ['PERFORMANCE', 'ACCESSIBILITY', 'BEST_PRACTICES', 'SEO'];
 
-export async function runPageSpeedCheck({ url, strategy = 'mobile', scanCtx } = {}) {
+export async function runPageSpeedCheck({ url, strategy, scanCtx, deviceProfile } = {}) {
+  // Si no se pasa strategy, derivar del device profile: mobile profiles → mobile.
+  const useStrategy = strategy
+    || (deviceProfile && deviceProfile !== 'desktop' && deviceProfile !== 'desktop-1080p'
+      ? 'mobile'
+      : 'desktop');
   try {
-    const params = new URLSearchParams({ url, strategy });
+    const params = new URLSearchParams({ url, strategy: useStrategy });
     for (const cat of CATEGORIES) params.append('category', cat);
     const apiKey = process.env.PAGESPEED_API_KEY;
     if (apiKey) params.set('key', apiKey);
@@ -63,7 +68,7 @@ export async function runPageSpeedCheck({ url, strategy = 'mobile', scanCtx } = 
 
     return {
       status,
-      data: { strategy, scores, vitals, finalUrl: json?.lighthouseResult?.finalUrl ?? url },
+      data: { strategy: useStrategy, scores, vitals, finalUrl: json?.lighthouseResult?.finalUrl ?? url },
       error: null,
     };
   } catch (err) {

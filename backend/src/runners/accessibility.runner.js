@@ -1,11 +1,16 @@
 // Inyecta axe-core en la página vía @axe-core/playwright y reporta violaciones.
 
 import { AxeBuilder } from '@axe-core/playwright';
-import { chromium } from 'playwright';
+import { chromium, devices } from 'playwright';
 
-import { DEFAULTS, RESULT_STATUS } from '../../../shared/constants.js';
+import {
+  DEFAULTS,
+  DEVICE_PROFILES,
+  DEFAULT_DEVICE_PROFILE,
+  RESULT_STATUS,
+} from '../../../shared/constants.js';
 
-export async function runAccessibilityCheck({ url, scanCtx } = {}) {
+export async function runAccessibilityCheck({ url, scanCtx, deviceProfile } = {}) {
   let browser;
   try {
     const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
@@ -15,10 +20,7 @@ export async function runAccessibilityCheck({ url, scanCtx } = {}) {
         await browser?.close();
       } catch {}
     });
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
-      viewport: { width: 1366, height: 768 },
-    });
+    const context = await browser.newContext(buildContextOptions(deviceProfile));
     const page = await context.newPage();
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
@@ -98,6 +100,25 @@ export async function runAccessibilityCheck({ url, scanCtx } = {}) {
   } finally {
     await browser?.close().catch(() => {});
   }
+}
+
+function buildContextOptions(deviceProfileId) {
+  const id =
+    deviceProfileId && DEVICE_PROFILES[deviceProfileId]
+      ? deviceProfileId
+      : DEFAULT_DEVICE_PROFILE;
+  const profile = DEVICE_PROFILES[id];
+  const pwDevice = profile.playwrightDevice ? devices[profile.playwrightDevice] : null;
+  if (pwDevice) {
+    return {
+      ...pwDevice,
+      userAgent: pwDevice.userAgent || 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
+    };
+  }
+  return {
+    userAgent: 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
+    viewport: profile.viewport,
+  };
 }
 
 function countBy(arr, key) {

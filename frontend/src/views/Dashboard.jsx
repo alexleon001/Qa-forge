@@ -134,7 +134,10 @@ export function Dashboard() {
         <div>
           <p className="text-xs uppercase tracking-widest text-slate-500">scan</p>
           <h1 className="text-2xl font-bold text-slate-50 break-all">{url ?? scanId}</h1>
-          <p className="mt-1 text-sm text-slate-500">ID: {scanId}</p>
+          <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+            <span>ID: {scanId}</span>
+            <DeviceBadge results={results} />
+          </p>
         </div>
         <div className="flex flex-col items-end gap-2">
           <StatusBadge status={status} />
@@ -219,6 +222,20 @@ export function Dashboard() {
         )}
       </div>
     </section>
+  );
+}
+
+function DeviceBadge({ results }) {
+  const capture = results?.find((r) => r.testName === 'playwright.capture');
+  const device = capture?.details?.device;
+  if (!device?.label) return null;
+  return (
+    <span
+      className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300"
+      title={`Viewport: ${device.viewport?.width}×${device.viewport?.height}`}
+    >
+      {device.isMobile ? '📱' : '🖥️'} {device.label}
+    </span>
   );
 }
 

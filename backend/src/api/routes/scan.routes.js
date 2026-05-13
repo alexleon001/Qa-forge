@@ -6,7 +6,11 @@ import { z } from 'zod';
 import { HttpError } from '../middlewares/error.middleware.js';
 import { parseDetails, prisma } from '../../db/client.js';
 import { enqueueScan } from '../../queue/scan.queue.js';
-import { SCAN_STATUS } from '../../../../shared/constants.js';
+import {
+  DEFAULT_DEVICE_PROFILE,
+  DEVICE_PROFILES,
+  SCAN_STATUS,
+} from '../../../../shared/constants.js';
 
 export const scanRouter = Router();
 
@@ -23,6 +27,10 @@ const createScanSchema = z.object({
         return false;
       }
     }, 'url debe ser una URL http(s) válida'),
+  deviceProfile: z
+    .enum(Object.keys(DEVICE_PROFILES))
+    .optional()
+    .nullable(),
 });
 
 scanRouter.post('/', async (req, res, next) => {
@@ -31,13 +39,14 @@ scanRouter.post('/', async (req, res, next) => {
     if (!parse.success) {
       throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
     }
-    const { url } = parse.data;
+    const { url, deviceProfile } = parse.data;
 
     const scan = await prisma.scan.create({
       data: {
         url,
         status: SCAN_STATUS.PENDING,
         userId: req.user?.id ?? null,
+        deviceProfile: deviceProfile ?? DEFAULT_DEVICE_PROFILE,
       },
     });
 

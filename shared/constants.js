@@ -71,6 +71,57 @@ export const QUEUE_NAME = 'qa-forge-scan';
 /** Modelo de Claude usado por el Script Generator. */
 export const CLAUDE_MODEL = 'claude-sonnet-4-6';
 
+/**
+ * Perfiles de dispositivo soportados al iniciar un scan. Mapeamos a Playwright
+ * `devices` en los runners. `desktop` es el default histórico (sin emulación).
+ */
+export const DEVICE_PROFILES = Object.freeze({
+  desktop: {
+    id: 'desktop',
+    label: 'Desktop (1366×768)',
+    playwrightDevice: null,
+    viewport: { width: 1366, height: 768 },
+    isMobile: false,
+  },
+  'desktop-1080p': {
+    id: 'desktop-1080p',
+    label: 'Desktop FullHD (1920×1080)',
+    playwrightDevice: null,
+    viewport: { width: 1920, height: 1080 },
+    isMobile: false,
+  },
+  tablet: {
+    id: 'tablet',
+    label: 'Tablet (iPad Pro 11)',
+    playwrightDevice: 'iPad Pro 11',
+    viewport: null, // tomado del device
+    isMobile: true,
+  },
+  'iphone-13': {
+    id: 'iphone-13',
+    label: 'iPhone 13',
+    playwrightDevice: 'iPhone 13',
+    viewport: null,
+    isMobile: true,
+  },
+  'iphone-15-pro': {
+    id: 'iphone-15-pro',
+    label: 'iPhone 15 Pro',
+    playwrightDevice: 'iPhone 15 Pro',
+    viewport: null,
+    isMobile: true,
+  },
+  'pixel-7': {
+    id: 'pixel-7',
+    label: 'Pixel 7 (Android)',
+    playwrightDevice: 'Pixel 7',
+    viewport: null,
+    isMobile: true,
+  },
+});
+
+export const DEFAULT_DEVICE_PROFILE = 'desktop';
+
 /** Headers de seguridad evaluados por security.analyzer / headers.runner. */
 export const SECURITY_HEADERS = Object.freeze([
   'strict-transport-security',

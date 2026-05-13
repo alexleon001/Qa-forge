@@ -44,8 +44,11 @@ function authErrorInterceptor(error) {
 api.interceptors.response.use((r) => r, authErrorInterceptor);
 aiApi.interceptors.response.use((r) => r, authErrorInterceptor);
 
-export async function createScan(url) {
-  const { data } = await api.post('/api/scan', { url });
+export async function createScan(url, { deviceProfile } = {}) {
+  const { data } = await api.post('/api/scan', {
+    url,
+    deviceProfile: deviceProfile ?? null,
+  });
   return data;
 }
 

@@ -6,8 +6,18 @@ import { useNavigate } from 'react-router-dom';
 import { createScan } from '../lib/api.js';
 import { useScanStore } from '../store/scan.store.js';
 
+const DEVICE_OPTIONS = [
+  { id: 'desktop', label: 'Desktop (1366×768)', icon: '🖥️' },
+  { id: 'desktop-1080p', label: 'Desktop FullHD', icon: '🖥️' },
+  { id: 'tablet', label: 'Tablet (iPad)', icon: '📱' },
+  { id: 'iphone-13', label: 'iPhone 13', icon: '📱' },
+  { id: 'iphone-15-pro', label: 'iPhone 15 Pro', icon: '📱' },
+  { id: 'pixel-7', label: 'Pixel 7 (Android)', icon: '🤖' },
+];
+
 export function Home() {
   const [url, setUrl] = useState('https://');
+  const [deviceProfile, setDeviceProfile] = useState('desktop');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
@@ -18,7 +28,7 @@ export function Home() {
     setError(null);
     setSubmitting(true);
     try {
-      const data = await createScan(url.trim());
+      const data = await createScan(url.trim(), { deviceProfile });
       startScan({ scanId: data.scanId, url: data.url, status: data.status });
       navigate(`/scan/${data.scanId}`);
     } catch (err) {
@@ -43,27 +53,56 @@ export function Home() {
         </p>
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-stretch"
-      >
-        <input
-          type="url"
-          required
-          placeholder="https://ejemplo.com"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-          data-testid="home-url-input"
-        />
-        <button
-          type="submit"
-          disabled={submitting}
-          className="rounded-lg bg-emerald-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-          data-testid="home-submit-btn"
-        >
-          {submitting ? 'Iniciando…' : 'Scan ahora'}
-        </button>
+      <form onSubmit={handleSubmit} className="mt-10 space-y-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch">
+          <input
+            type="url"
+            required
+            placeholder="https://ejemplo.com"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            className="flex-1 rounded-lg border border-slate-700 bg-slate-900 px-4 py-3 text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            data-testid="home-url-input"
+          />
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded-lg bg-emerald-500 px-6 py-3 font-medium text-slate-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+            data-testid="home-submit-btn"
+          >
+            {submitting ? 'Iniciando…' : 'Scan ahora'}
+          </button>
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs uppercase tracking-widest text-slate-500">
+            Dispositivo a emular
+          </p>
+          <div
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+            data-testid="device-selector"
+          >
+            {DEVICE_OPTIONS.map((opt) => {
+              const active = deviceProfile === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setDeviceProfile(opt.id)}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
+                    active
+                      ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-200'
+                      : 'border-slate-700 bg-slate-900/40 text-slate-300 hover:border-slate-600'
+                  }`}
+                  data-testid={`device-${opt.id}`}
+                >
+                  <span aria-hidden>{opt.icon}</span>
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </form>
 
       {error ? (

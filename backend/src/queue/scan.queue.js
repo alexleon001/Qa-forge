@@ -271,6 +271,7 @@ async function processScan(scanId) {
         runPlaywrightCapture({
           url: scan.url,
           scanCtx: ctx,
+          deviceProfile: scan.deviceProfile,
           onStage: (stage) =>
             emitProgress(scanId, { stage, message: `Playwright: ${stage}` }),
         }),
@@ -373,7 +374,13 @@ async function processScan(scanId) {
     await checkCancellation(ctx);
     emitStage(scanId, SCAN_STAGE.ANALYZING_ACCESSIBILITY, 'Analizando accesibilidad (axe-core)');
     const a11yResult = await timed('accessibility', () =>
-      safeRun(() => runAccessibilityCheck({ url: scan.url, scanCtx: ctx })),
+      safeRun(() =>
+        runAccessibilityCheck({
+          url: scan.url,
+          scanCtx: ctx,
+          deviceProfile: scan.deviceProfile,
+        }),
+      ),
     );
     await persistResult(scanId, {
       category: TEST_CATEGORY.ACCESSIBILITY,
@@ -387,7 +394,13 @@ async function processScan(scanId) {
     await checkCancellation(ctx);
     emitStage(scanId, SCAN_STAGE.ANALYZING_PERFORMANCE, 'Consultando PageSpeed Insights');
     const psResult = await timed('pagespeed', () =>
-      safeRun(() => runPageSpeedCheck({ url: scan.url, scanCtx: ctx })),
+      safeRun(() =>
+        runPageSpeedCheck({
+          url: scan.url,
+          scanCtx: ctx,
+          deviceProfile: scan.deviceProfile,
+        }),
+      ),
     );
     await persistResult(scanId, {
       category: TEST_CATEGORY.PERFORMANCE,

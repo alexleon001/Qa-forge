@@ -50,6 +50,7 @@ model Scan {
   errorMessage String?
   notes       String? // notas libres de QA (Markdown), editables desde la UI
   cancelRequestedAt DateTime? // si está seteado, el worker aborta el pipeline
+  deviceProfile String  @default("desktop") // ver shared/constants.js DEVICE_PROFILES
   userId      String? // dueño del scan (nullable para retro-compatibilidad)
   createdAt   DateTime  @default(now())
   startedAt   DateTime?

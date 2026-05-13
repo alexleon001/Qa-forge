@@ -1,13 +1,18 @@
 // Runner principal de Playwright: navega la URL y captura DOM, screenshot,
 // links, forms y meta tags. Devuelve { status, data, error }.
 
-import { chromium } from 'playwright';
-import { DEFAULTS, RESULT_STATUS } from '../../../shared/constants.js';
+import { chromium, devices } from 'playwright';
+import {
+  DEFAULTS,
+  DEVICE_PROFILES,
+  DEFAULT_DEVICE_PROFILE,
+  RESULT_STATUS,
+} from '../../../shared/constants.js';
 
 /**
- * @param {{ url: string, onStage?: (stage: string) => void, scanCtx?: import('../queue/scan.queue.js').ScanContext }} opts
+ * @param {{ url: string, onStage?: (stage: string) => void, scanCtx?: import('../queue/scan.queue.js').ScanContext, deviceProfile?: string }} opts
  */
-export async function runPlaywrightCapture({ url, onStage, scanCtx } = {}) {
+export async function runPlaywrightCapture({ url, onStage, scanCtx, deviceProfile } = {}) {
   let browser;
   try {
     onStage?.('launching_browser');
@@ -22,12 +27,11 @@ export async function runPlaywrightCapture({ url, onStage, scanCtx } = {}) {
         await browser?.close();
       } catch {}
     });
-    const context = await browser.newContext({
-      userAgent:
-        'Mozilla/5.0 (compatible; QAForgeBot/0.1; +https://github.com/qa-forge)',
-      viewport: { width: 1366, height: 768 },
-    });
+    const context = await browser.newContext(buildContextOptions(deviceProfile));
     const page = await context.newPage();
+
+    // Emitir info del device usado para el frontend.
+    const profile = resolveProfile(deviceProfile);
 
     onStage?.('capturing_dom');
     const response = await page.goto(url, {
@@ -103,6 +107,12 @@ export async function runPlaywrightCapture({ url, onStage, scanCtx } = {}) {
         links: extracted.links,
         forms: extracted.forms,
         headings: extracted.headings,
+        device: {
+          id: profile.id,
+          label: profile.label,
+          viewport: profile.viewport,
+          isMobile: profile.isMobile,
+        },
       },
       error: null,
     };
@@ -115,4 +125,41 @@ export async function runPlaywrightCapture({ url, onStage, scanCtx } = {}) {
   } finally {
     await browser?.close().catch(() => {});
   }
+}
+
+/** Devuelve el perfil de device a usar (con fallback a desktop). */
+function resolveProfile(deviceProfileId) {
+  const id = deviceProfileId && DEVICE_PROFILES[deviceProfileId]
+    ? deviceProfileId
+    : DEFAULT_DEVICE_PROFILE;
+  const profile = DEVICE_PROFILES[id];
+  const pwDevice = profile.playwrightDevice ? devices[profile.playwrightDevice] : null;
+  return {
+    id,
+    label: profile.label,
+    viewport: pwDevice?.viewport ?? profile.viewport,
+    isMobile: profile.isMobile,
+    pwDevice,
+  };
+}
+
+/** Construye las options de newContext según el device profile elegido. */
+function buildContextOptions(deviceProfileId) {
+  const profile = resolveProfile(deviceProfileId);
+  // Si Playwright tiene un device profile registrado, lo usamos completo
+  // (incluye userAgent, deviceScaleFactor, isMobile, hasTouch, etc.).
+  if (profile.pwDevice) {
+    return {
+      ...profile.pwDevice,
+      userAgent: profile.pwDevice.userAgent || defaultUserAgent(),
+    };
+  }
+  return {
+    userAgent: defaultUserAgent(),
+    viewport: profile.viewport,
+  };
+}
+
+function defaultUserAgent() {
+  return 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +https://github.com/qa-forge)';
 }
