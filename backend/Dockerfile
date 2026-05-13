@@ -26,7 +26,8 @@ WORKDIR /app/backend
 RUN bunx prisma generate --schema=src/db/schema.prisma
 
 ENV NODE_ENV=production
-ENV PORT=3001
+# PORT no se hardcodea — Railway/Render/Fly inyectan su propio $PORT que la
+# app lee via process.env.PORT (default 3001 para dev local).
 EXPOSE 3001
 
 # Push del schema (idempotente) + arranque.
