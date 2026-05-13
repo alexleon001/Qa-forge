@@ -1,0 +1,424 @@
+// QA Forge — Session Context para Claude Code
+
+# QA Forge — Session Context
+
+## Proyecto
+
+**QA Forge** es una herramienta de QA automatizado. Recibe una URL, ejecuta una
+batería de pruebas funcionales y no funcionales sobre ella (Playwright para
+DOM/screenshots, headers HTTP, SSL/TLS, accesibilidad, performance, SEO, links,
+forms, seguridad) y genera scripts de automatización listos para usar en
+**Playwright (TS)**, **Cypress (JS)** y **Selenium (Python)** mediante Claude API.
+
+El repositorio convive con una **plantilla AI-Driven** (`.context/`, `.prompts/`,
+`.books/`, `docs/`, `cli/`, `scripts/`, `templates/`) que aporta la metodología
+IQL + KATA y prompts/guidelines. **No tocar la plantilla** salvo para extender
+documentación de QA Forge.
+
+---
+
+## Stack
+
+### Backend (`backend/`)
+
+- Runtime: **Bun** (compatible con Node.js 20+ APIs)
+- Framework: **Express.js**
+- Browser automation: **Playwright** (headless Chromium)
+- Queue: **BullMQ + Redis** (jobs async de scan). Se cambió `bull` → `bullmq` en
+  FASE 1 por incompatibilidad de `bull` con Bun en Windows (sus Lua scripts no
+  se resuelven). BullMQ es el sucesor oficial del mismo equipo.
+- DB: **SQLite** (dev) / **PostgreSQL** (prod) con **Prisma ORM**
+- Real-time: **Socket.io** (server)
+- Seguridad: custom HTTP headers checker + `ssl-checker`
+- Performance: **Google PageSpeed Insights API** (tier gratuito)
+- IA: **Claude API** modelo `claude-sonnet-4-6` para generación de scripts
+
+### Frontend (`frontend/`)
+
+- **React 18 + Vite**
+- **Tailwind CSS** + **shadcn/ui**
+- Estado: **Zustand**
+- Real-time: **Socket.io client**
+- Charts: **Recharts**
+- Code highlight: **Shiki**
+
+### DevOps
+
+- Docker + docker-compose (Redis + Postgres en FASE 4)
+- `.env` con `dotenv`
+
+---
+
+## Puertos
+
+| Servicio  | Puerto |
+| --------- | ------ |
+| Backend   | 3001   |
+| Frontend  | 5173   |
+| Redis     | 6379   |
+| Postgres  | 5432   |
+
+---
+
+## Convenciones
+
+1. **Código en inglés, comentarios en español** (los identificadores no se traducen).
+2. **Async/await siempre**, nunca callbacks.
+3. **Cada runner devuelve `{ status, data, error }`** con `status` ∈ `pass | fail | warning | info`.
+4. **Fail gracefully**: ningún error individual rompe el scan completo. Capturar
+   excepciones y persistir como `Result` con `status: "fail"`.
+5. **Variables de entorno**: siempre desde `process.env`, nunca hardcodear secrets,
+   URLs, puertos o API keys.
+6. **Cada archivo `.js`/`.jsx` arranca con un comentario de propósito** en la primera línea.
+7. **Modelo Claude**: usar la constante `CLAUDE_MODEL` exportada desde
+   `shared/constants.js` (`claude-sonnet-4-6`). No hardcodear el modelo en el generator.
+8. **Sin tipos `any` ni `// @ts-ignore`** si se llega a migrar a TS.
+9. **Imports relativos** con extensión explícita (`.js` / `.jsx`) — Bun + ESM lo exige.
+10. **DRY**: la lista de runners de FASE 1 está centralizada en `backend/src/queue/scan.queue.js`.
+
+---
+
+## Modelo de datos (resumen)
+
+- `Scan` (id, url, status `pending|running|completed|failed`, timestamps)
+- `Result` (scanId, category, testName, status, score, details `JSON`)
+- `Script` (scanId, framework, language, content)
+
+Schema completo en `backend/src/db/schema.prisma`.
+
+---
+
+## Categorías de tests (`shared/constants.js`)
+
+`functional | security | performance | accessibility | seo`
+
+---
+
+## Cómo correr
+
+### Modo dev local (recomendado para iterar)
+
+> ⚠️ **Backend en Windows: usar `node`, no `bun`.** El runtime preferido del proyecto
+> sigue siendo Bun (dependencias, scripts, prisma, etc.), pero **al ejecutar el
+> proceso backend (`src/index.js`) en Windows hay que usar Node** porque Bun + Playwright
+> en Windows falla: Chromium se lanza pero la comunicación por pipe
+> (`--remote-debugging-pipe`) entre Bun y `chrome-headless-shell` nunca se establece,
+> y todo scan timeoutea en 180s con `launch: Timeout 180000ms exceeded` (visto en
+> sesión 2026-05-12). Con Node anda OK. En Linux/Mac (ej. dentro del contenedor
+> Docker basado en `mcr.microsoft.com/playwright`) Bun anda bien.
+
+```bash
+# Infra: Redis + Postgres (ambos necesarios — schema.prisma usa postgresql)
+docker compose up redis postgres -d
+
+# Backend (otra terminal)
+cd backend
+cp .env.example .env       # rellenar GEMINI_API_KEY (default, free) o la que uses
+bun install                # bun sí para instalar
+bunx prisma generate
+bunx prisma db push        # crea las tablas en el postgres local
+bunx playwright install chromium
+node src/index.js          # ← Node, NO bun. Express + Socket.io en :3001
+
+# Frontend (otra terminal) — bun acá anda perfecto
+cd frontend
+bun install
+bun run dev                # Vite en :5173
+```
+
+#### Workaround alternativo si querés mantener Bun
+
+Setear `PLAYWRIGHT_CHANNEL=chrome` (o `msedge`) antes de arrancar — eso fuerza
+a Playwright a usar el Chrome/Edge del sistema en vez del `chrome-headless-shell`
+bundled, que sí logra hablar con Bun. Los runners `playwright.runner.js` y
+`accessibility.runner.js` ya leen esa variable.
+
+```powershell
+$env:PLAYWRIGHT_CHANNEL = "chrome"
+bun run src/index.js
+```
+
+### Modo stack completo (todo en contenedores)
+
+```bash
+# Setear claves opcionales en el shell antes de levantar
+export ANTHROPIC_API_KEY=sk-ant-...   # FASE 3
+export PAGESPEED_API_KEY=...          # FASE 2 (opcional)
+
+docker compose --profile full up -d --build
+# Frontend: http://localhost:5173
+# Backend:  http://localhost:3001
+```
+
+---
+
+## Deploy a producción (Railway + Vercel)
+
+**Frontend** va a Vercel; **backend** va a Railway (necesita contenedor con
+Playwright + worker BullMQ + Redis + Postgres). Vercel serverless no soporta
+ninguna de esas cosas, por eso el split.
+
+### 1. Railway — backend
+
+1. Crear proyecto en https://railway.app conectando el repo de GitHub.
+2. Agregar 2 plugins desde la UI: **Postgres** y **Redis** (1 click cada uno).
+3. Crear un servicio "backend" que apunte al repo. Railway detecta el
+   `railway.toml` en la raíz (build via `backend/Dockerfile`).
+4. Setear envs del servicio:
+   - `DATABASE_URL` → referenciar la del plugin Postgres (`${{Postgres.DATABASE_URL}}`)
+   - `REDIS_URL` → `${{Redis.REDIS_URL}}`
+   - `FRONTEND_URL` → URL final de Vercel (se setea después; *.vercel.app
+     ya se acepta por default — ver `ALLOW_VERCEL_PREVIEWS`)
+   - `AI_PROVIDER=gemini` (o el que prefieras)
+   - `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` / etc. según el provider elegido
+   - `PAGESPEED_API_KEY` (opcional)
+   - `NODE_ENV=production`
+5. Generar un dominio público (Settings → Networking → Generate Domain).
+   Anotá la URL (`https://qaforge-backend-production.up.railway.app`).
+6. Healthcheck: `/api/health` (ya configurado en `railway.toml`).
+
+### 2. Vercel — frontend
+
+1. New Project en https://vercel.com importando el repo.
+2. **Root Directory**: `frontend`.
+3. Framework: Vite (auto-detect). El `vercel.json` ya define build commands.
+4. Env var: `VITE_API_URL=https://<tu-backend>.up.railway.app`
+5. Deploy. Vercel da el dominio (`https://qa-forge-xyz.vercel.app`).
+6. Volver a Railway y setear `FRONTEND_URL` con ese dominio.
+
+### 3. Notas
+
+- **CORS**: el backend acepta `FRONTEND_URL` (lista separada por coma) +
+  cualquier `*.vercel.app` (preview deploys) salvo que setees
+  `ALLOW_VERCEL_PREVIEWS=false`.
+- **Costos**: Vercel free alcanza. Railway tiene $5 trial; luego ~$5-10/mes
+  por el backend + Postgres + Redis.
+- **Schema migrations**: el startCommand corre `prisma db push` en cada deploy
+  (idempotente). Para esquemas más serios migrar a `prisma migrate deploy`.
+- **Modelo demo**: si querés exponerlo público, considerar agregar rate limit
+  + auth básica (post-MVP, hoy no está implementado).
+
+---
+
+## Estado actual
+
+> **Última fase completada:** FASE 6 — Casos de prueba manuales con IA
+> **Última sesión:** 2026-05-13 (FASE 6 + setup de deploy Railway/Vercel)
+
+### Implementado
+
+- ✅ Scaffold raíz: `CLAUDE.md`, `docker-compose.yml`, `.env.example` extendido
+- ✅ Backend scaffold: Express + Socket.io + Prisma + Bull queue
+- ✅ Runners FASE 1: `playwright.runner.js`, `headers.runner.js`, `ssl.runner.js`
+- ✅ API: `POST /api/scan`, `GET /api/scan/:id`
+- ✅ Queue Bull con eventos hacia Socket.io
+- ✅ Frontend scaffold: Vite + Tailwind + Zustand + Socket.io client
+- ✅ Vistas: `Home`, `Dashboard` (progreso en tiempo real)
+- ✅ `shared/constants.js`
+
+### FASE 2 — Implementado
+
+- ✅ Analyzers (puros, sobre data ya capturada):
+  - `seo.analyzer.js` (title, meta, OG, robots, h1, lang) — score 0-100
+  - `links.analyzer.js` (HEAD a cada link, concurrency=8, máx 50 links)
+  - `forms.analyzer.js` (CSRF hint, action http en página https, inputs sin name)
+  - `security.analyzer.js` (score 0-100 ponderado: https, HSTS, CSP, XFO, etc.)
+- ✅ Runners externos:
+  - `pagespeed.runner.js` (Google PageSpeed Insights API, scores + Web Vitals)
+  - `accessibility.runner.js` (`@axe-core/playwright`, WCAG2A/AA + best-practice)
+- ✅ Queue actualizada: pipeline de 9 pasos con `safeRun` (errores no rompen el scan)
+- ✅ `summary.byCategory`: promedio de scores por categoría enviado al frontend
+- ✅ Endpoint export: `GET /api/report/:id/export?format=json|html`
+- ✅ HTML self-contained con inline styles (`reports/html.template.js`)
+- ✅ Vista `ReportDetail` con `ScoreGauge` SVG por categoría + `ExportButton`
+- ✅ Dashboard agrega link "Ver reporte detallado" cuando `status === completed`
+
+### FASE 3 — Implementado
+
+- ✅ `backend/src/generators/script.generator.js` con `@anthropic-ai/sdk` v0.88
+  - Modelo: `claude-sonnet-4-6` (constante `CLAUDE_MODEL` en `shared/constants.js`)
+  - `thinking: { type: "adaptive" }` + `output_config.effort: "medium"`
+  - `output_config.format: { type: "json_schema", schema: ... }` — sin prefills (deprecated en 4.6)
+  - **Prompt caching**: `cache_control: { type: "ephemeral" }` en el system prompt
+    (frozen entre scans → hit de cache desde el 2do scan)
+  - Sin streaming (max_tokens 16K — dentro del default seguro de la SDK)
+  - Resumen del DOM previo al prompt: solo meta, headings, forms y muestreo de links
+    (sin html crudo ni screenshot — sería costoso)
+- ✅ Endpoints `scripts.routes.js`:
+  - `POST /api/scripts/:scanId` body `{ additionalCases?, force? }` → genera (o devuelve cached si ya hay 3)
+  - `GET /api/scripts/:scanId` → lista (404 si no hay aún)
+  - 503 limpio si `ANTHROPIC_API_KEY` falta
+  - 409 si el scan aún no tiene `playwright.capture`
+- ✅ Persistencia: 3 `Script` records por scan (reemplaza los anteriores en transacción)
+- ✅ Frontend:
+  - Vista `ScriptGenerator` en ruta `/scan/:scanId/scripts`
+  - `ScriptViewer` con Shiki (lazy load, themes: github-dark; langs: ts/js/python)
+  - Tabs por framework, botones Copy + Download (`.spec.ts` / `.cy.js` / `test.py`)
+  - Textarea para "casos adicionales" en NL → la IA los agrega como tests extras
+  - Links cruzados Dashboard → Scripts y Report → Scripts
+
+### FASE 4 — Implementado
+
+- ✅ Vista `History` en `/history`: lista paginada (últimos 50), agrupada por
+  URL, filtro de búsqueda inline, links a Progreso/Reporte/Scripts por scan,
+  botón "Comparar últimos 2" cuando hay ≥ 2 scans de la misma URL
+- ✅ Vista `Compare` en `/compare?a=<id>&b=<id>`: trae los 2 reportes en paralelo,
+  computa diff de scores por categoría con deltas coloreados (+verde / −rojo),
+  ScoreGauges lado a lado y tabla resumen
+- ✅ Header nav: link "History" activo (antes decía "FASE 4")
+- ✅ `backend/Dockerfile` basado en `mcr.microsoft.com/playwright:v1.49.1-jammy`
+  (Chromium + libs de sistema ya incluidos) + Bun 1.3.10 encima. Layer-cache
+  amigable (deps primero, código después). Entrypoint hace `prisma db push` +
+  `bun src/index.js`.
+- ✅ `frontend/Dockerfile` multi-stage: build con `oven/bun:1.3-alpine`,
+  sirve con `nginx:1.27-alpine` + `nginx.conf` con SPA fallback + cache de assets
+- ✅ `docker-compose.yml` con perfiles:
+  - default: solo `redis` (modo dev — `bun run dev` local apunta al Redis containerizado)
+  - `--profile full`: levanta redis + postgres + backend + frontend
+  - `depends_on` con healthchecks, volúmenes para Postgres y SQLite
+- ✅ `.dockerignore` en ambos paquetes para mantener las imágenes livianas
+
+### FASE 5 — Implementado
+
+> Pedido del usuario: no depender solo de Anthropic (paga) y abrir alternativas
+> gratuitas (Gemini free tier, Ollama local). Implementado los 5 providers
+> elegidos.
+
+- ✅ Abstracción `backend/src/generators/providers/`:
+  - `base.js` — `ProviderError`, `parseJsonOutput()` (con fallbacks para
+    JSON envuelto en ```...``` o con texto extra)
+  - `anthropic.provider.js` — `claude-sonnet-4-6`, adaptive thinking, JSON schema, prompt cache
+  - `gemini.provider.js` — `gemini-2.0-flash`, `responseSchema` (sanitiza
+    el schema: Gemini no soporta `additionalProperties`)
+  - `openai.provider.js` — `gpt-4o-mini`, `response_format: json_schema` strict
+  - `openrouter.provider.js` — SDK de OpenAI con `baseURL` custom, `json_object`
+    mode (más compat con modelos diversos), schema injection en system prompt
+  - `ollama.provider.js` — REST a `http://localhost:11434/api/chat`,
+    `format` field con JSON schema, timeout 5 min, ping a `/api/tags` para `isConfigured()`
+  - `index.js` — registry + `resolveProvider({ requestedId })` con modo `auto`
+- ✅ `script.generator.js` refactor: ahora solo arma prompt + summary del DOM
+  + llama al provider resuelto. SYSTEM_PROMPT y SCRIPT_OUTPUT_SCHEMA exportados.
+- ✅ Endpoint nuevo `GET /api/scripts/providers` → lista providers con
+  `{ id, label, defaultModel, configured, isDefault }`
+- ✅ `POST /api/scripts/:scanId` acepta `{ provider, model }` en el body
+- ✅ Frontend `ScriptGenerator` muestra dropdown con todos los providers
+  (configurados habilitados, no configurados disabled con etiqueta).
+  El default se selecciona automáticamente al primer configurado.
+- ✅ `.env.example` documenta todas las API keys + override por modelo:
+  `AI_PROVIDER`, `AI_MODEL_*`, `GEMINI_API_KEY`, `OPENAI_API_KEY`,
+  `OPENROUTER_API_KEY`, `OLLAMA_BASE_URL`, `OPENROUTER_REFERER`
+- ✅ `docker-compose.yml` pasa todas las envs al contenedor backend.
+  `OLLAMA_BASE_URL` default `host.docker.internal:11434` para que el container
+  llame a Ollama corriendo en el host.
+
+### Validación FASE 5
+
+- ✅ `bun install @google/genai openai` OK
+- ✅ Backend bootea con todos los providers cargados
+- ✅ `GET /api/scripts/providers` devuelve los 5 con `configured: false` (esperado
+  sin keys ni Ollama)
+- ✅ Frontend buildea: 286 KB JS (gz 94 KB) — sin cambio significativo
+- ⚠️ Para validar generación real con cada provider hace falta setear la key
+  respectiva y completar un scan primero. **El default `gemini` permite
+  usar la herramienta gratis con solo una key de Google AI Studio.**
+
+### Setup rápido por provider
+
+| Provider | Setup |
+|---|---|
+| Gemini (default, free) | https://aistudio.google.com/apikey → `GEMINI_API_KEY=...` |
+| Anthropic | https://console.anthropic.com → `ANTHROPIC_API_KEY=...` |
+| OpenAI | https://platform.openai.com/api-keys → `OPENAI_API_KEY=...` |
+| OpenRouter | https://openrouter.ai/keys → `OPENROUTER_API_KEY=...` |
+| Ollama (local) | `ollama serve` + `ollama pull qwen2.5-coder:7b` |
+
+### FASE 6 — Implementado
+
+- ✅ `backend/src/generators/manualcases.generator.js` paralelo al `script.generator.js`
+  - Reusa la abstracción multi-provider de FASE 5 (`resolveProvider()`)
+  - Schema: `{ id, title, category, priority, preconditions[], steps[{action, expected}],
+    postconditions[], testData?, notes? }`
+- ✅ Persistencia: reusa tabla `Script` con `framework: "manual"`, `language: "json"`,
+  `content` = JSON serializado del array de testCases (no se creó tabla nueva)
+- ✅ Endpoints `manualcases.routes.js`:
+  - `POST /api/manual-cases/:scanId` body `{ additionalCases?, force?, provider?, model? }`
+  - `GET /api/manual-cases/:scanId` (404 si no hay aún)
+- ✅ Frontend: vista `ManualCases` en `/scan/:scanId/manual-cases`
+  - Mismo patrón que `ScriptGenerator`: dropdown de provider, textarea adicional
+  - Acordeón por categoría con badge de prioridad
+  - Export a **Markdown / CSV / JSON** (compatible con Jira/TestRail/Zephyr import)
+- ✅ Links cruzados desde Dashboard, ReportDetail y ScriptGenerator
+
+### Deploy a producción (2026-05-13)
+
+- ✅ Migración del schema a **Postgres** (`provider = "postgresql"` en `schema.prisma`)
+- ✅ CORS multi-origen: `FRONTEND_URL` acepta lista CSV + `*.vercel.app` por default
+  (flag `ALLOW_VERCEL_PREVIEWS=false` para desactivar)
+- ✅ Socket cliente cae a `VITE_API_URL` si no se setea `VITE_SOCKET_URL`
+- ✅ `railway.toml` en la raíz (build via `backend/Dockerfile`, healthcheck `/api/health`)
+- ✅ `frontend/vercel.json` (build con Vite + SPA rewrites)
+- ✅ docker-compose: postgres movido fuera del profile `full` para dev local
+
+### Pendiente (post-MVP, lower prio)
+
+- ⬜ Optimización Shiki: usar `shiki/core` con imports explícitos para reducir
+  los chunks de grammars emitidos por Vite
+- ⬜ Paginación real en `GET /api/scan` (hoy devuelve top 50)
+- ⬜ Auth si el deploy va público
+- ⬜ Migrar de `prisma db push` a `prisma migrate deploy` para versionar schema
+
+### Notas / decisiones
+
+- **Modelo Claude:** se usa `claude-sonnet-4-6` (más reciente al cierre de FASE 1)
+  en vez del `claude-sonnet-4-20250514` del prompt original. Si la API lo deprec
+  a cambiar la constante en `shared/constants.js`.
+- **Queue:** se reemplazó `bull` por `bullmq` (incompat con Bun/Windows). API
+  ligeramente distinta: `Queue` + `Worker` separados, conexión como objeto.
+- **QUEUE_NAME:** `qa-forge-scan` (BullMQ no admite `:` en el nombre).
+- **SQLite local + Prisma:** archivo en `backend/src/db/dev.db` (gitignored).
+  El schema vive en `backend/src/db/schema.prisma` — el `prisma` block en el
+  `package.json` lo apunta.
+- **Plantilla AI-Driven:** se respeta intacta. La documentación específica
+  de QA Forge vive en este `CLAUDE.md` + `.context/` (futura extensión).
+
+### Validación FASE 1
+
+- ✅ `bun install` en backend y frontend OK
+- ✅ `bunx prisma generate` + `bunx prisma db push` crea `dev.db`
+- ✅ `bunx playwright install chromium` descarga el binario
+- ✅ `bun src/index.js` arranca Express+Socket.io en :3001 (worker arranca aunque
+  Redis no esté disponible — errores no fatales en logs)
+- ✅ `GET /api/health` responde 200 con `{status: "ok"}`
+- ✅ `POST /api/scan` valida input con Zod (rechaza URL inválida con 400)
+- ✅ `bun run build` del frontend produce dist/ válido (~261 KB JS gz: 87 KB)
+
+### Validación FASE 2
+
+- ✅ `bun install @axe-core/playwright` OK
+- ✅ Backend bootea con todos los nuevos imports (analyzers + runners + html template)
+- ✅ `GET /api/report/:id` responde 404 cuando no existe (validación de loadReport)
+- ✅ Frontend buildea: 267 KB JS (gz 88 KB) — 6 KB de delta vs FASE 1
+- ⚠️ Pendiente: scan e2e real con Redis levantado (no había docker en el host de
+  esta sesión). Para validarlo: instalar Redis nativo o Docker Desktop y correr
+  `docker compose up -d redis` o el equivalente con `redis-server`.
+
+### Validación FASE 3
+
+- ✅ `bun install @anthropic-ai/sdk@0.88` OK
+- ✅ Backend bootea con generator + scripts.routes registrados
+- ✅ `POST /api/scripts/nope` responde 404 (validación de scan)
+- ✅ `GET /api/scripts/nope` responde 404 `NO_SCRIPTS`
+- ✅ Frontend buildea: chunk principal 276 KB (gz 91 KB), Shiki en chunks lazy
+  (wasm 622 KB / langs 200 KB cada uno — solo se cargan al abrir `/scripts`)
+- ⚠️ Para probar la generación real: setear `ANTHROPIC_API_KEY` en `backend/.env`
+  y completar un scan primero (necesita Redis para que la queue procese).
+
+### Validación FASE 4
+
+- ✅ Backend bootea con todos los routers (FASE 1-3 + diffs no rompen nada)
+- ✅ Frontend buildea: 285 KB JS (gz 94 KB) — +10 KB por History+Compare
+- ✅ `docker-compose config` parsea sin errores (sintaxis válida — verificado
+  estructuralmente; no se ejecutó `compose up` por falta de Docker en el host
+  de esta sesión)
+- ⚠️ Pendiente probar `docker compose --profile full up --build` en host con
+  Docker (la imagen Playwright + Bun pesa ~1 GB, el primer build tarda ~5 min).

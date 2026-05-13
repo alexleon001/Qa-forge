@@ -1,0 +1,37 @@
+{
+  "name": "qa-forge-backend",
+  "version": "0.1.0",
+  "description": "Backend de QA Forge: Express + Playwright + Prisma + Bull queue + Socket.io",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch src/index.js",
+    "start": "bun src/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:studio": "prisma studio",
+    "playwright:install": "playwright install chromium"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
+    "@axe-core/playwright": "^4.10.1",
+    "@google/genai": "^1.5.0",
+    "@prisma/client": "^5.22.0",
+    "openai": "^4.96.0",
+    "axios": "^1.7.9",
+    "bullmq": "^5.34.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "playwright": "^1.49.1",
+    "socket.io": "^4.8.1",
+    "ssl-checker": "^2.0.10",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "prisma": "^5.22.0"
+  },
+  "prisma": {
+    "schema": "src/db/schema.prisma"
+  }
+}

@@ -1,0 +1,89 @@
+# docker-compose para QA Forge — stack completo: redis + postgres + backend + frontend.
+#
+# Modos:
+#   Dev local (solo infra: redis + postgres — backend/frontend corren con node/bun):
+#     docker compose up redis postgres -d
+#
+#   Stack completo (todo en contenedores):
+#     docker compose --profile full up -d --build
+#
+# El backend usa Postgres en dev y prod (provider = "postgresql" en schema.prisma).
+# Para deploy en Railway: usar el addon de Postgres y setear DATABASE_URL.
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: qa-forge-redis
+    ports:
+      - '6379:6379'
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: qa-forge-postgres
+    environment:
+      POSTGRES_USER: qaforge
+      POSTGRES_PASSWORD: qaforge
+      POSTGRES_DB: qaforge
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U qaforge']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    profiles: ['full']
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: qa-forge-backend
+    environment:
+      PORT: 3001
+      FRONTEND_URL: http://localhost:5173
+      DATABASE_URL: postgresql://qaforge:qaforge@postgres:5432/qaforge
+      REDIS_URL: redis://redis:6379
+      AI_PROVIDER: ${AI_PROVIDER:-gemini}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
+      NODE_ENV: production
+    ports:
+      - '3001:3001'
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    profiles: ['full']
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # En el stack containerizado el browser apunta al backend expuesto en localhost:3001.
+        VITE_API_URL: http://localhost:3001
+        VITE_SOCKET_URL: http://localhost:3001
+    container_name: qa-forge-frontend
+    ports:
+      - '5173:80'
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

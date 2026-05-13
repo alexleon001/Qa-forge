@@ -1,0 +1,61 @@
+// Schema de Prisma para QA Forge. Dev usa SQLite; prod usa PostgreSQL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // Postgres en dev y prod. Para dev local levantar postgres con:
+  //   docker compose up redis postgres -d
+  // (postgres está en el profile "full"; ver docker-compose.yml). O usar
+  // cualquier postgres local. DATABASE_URL se toma del .env.
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Scan {
+  id          String    @id @default(cuid())
+  url         String
+  status      String    @default("pending") // pending | running | completed | failed
+  stage       String? // etapa actual (SCAN_STAGE) — se actualiza durante el run
+  errorMessage String?
+  createdAt   DateTime  @default(now())
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  results Result[]
+  scripts Script[]
+
+  @@index([url])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Result {
+  id        String   @id @default(cuid())
+  scanId    String
+  category  String // functional | security | performance | accessibility | seo
+  testName  String
+  status    String // pass | fail | warning | info
+  score     Float?
+  details   String // JSON serializado (SQLite no soporta Json nativo en todos los providers)
+  createdAt DateTime @default(now())
+
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@index([category])
+}
+
+model Script {
+  id        String   @id @default(cuid())
+  scanId    String
+  framework String // playwright | cypress | selenium
+  language  String // typescript | javascript | python
+  content   String
+  createdAt DateTime @default(now())
+
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+}

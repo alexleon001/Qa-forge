@@ -1,0 +1,14 @@
+# Configuración de Railway para el servicio backend de QA Forge.
+# El root del repo se monta en /app; el Dockerfile vive en backend/Dockerfile
+# pero su build context es la raíz (necesita copiar shared/ además de backend/).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+startCommand = "bunx prisma db push --schema=src/db/schema.prisma --accept-data-loss && bun src/index.js"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3
