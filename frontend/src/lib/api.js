@@ -9,6 +9,13 @@ export const api = axios.create({
   timeout: 30_000,
 });
 
+// Cliente con timeout más largo para llamadas de generación con LLM (OpenRouter
+// free, Anthropic con thinking, Gemini con prompts largos pueden tardar 1-2min).
+const aiApi = axios.create({
+  baseURL,
+  timeout: 180_000,
+});
+
 export async function createScan(url) {
   const { data } = await api.post('/api/scan', { url });
   return data;
@@ -49,7 +56,7 @@ export async function generateScripts(
   scanId,
   { additionalCases, force, provider, model } = {},
 ) {
-  const { data } = await api.post(`/api/scripts/${scanId}`, {
+  const { data } = await aiApi.post(`/api/scripts/${scanId}`, {
     additionalCases: additionalCases ?? null,
     force: force ?? false,
     provider: provider ?? null,
@@ -77,7 +84,7 @@ export async function generateManualCases(
   scanId,
   { additionalCases, force, provider, model } = {},
 ) {
-  const { data } = await api.post(`/api/manual-cases/${scanId}`, {
+  const { data } = await aiApi.post(`/api/manual-cases/${scanId}`, {
     additionalCases: additionalCases ?? null,
     force: force ?? false,
     provider: provider ?? null,
