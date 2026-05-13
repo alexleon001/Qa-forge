@@ -79,10 +79,56 @@ export const openrouterProvider = {
       };
     } catch (err) {
       if (err instanceof ProviderError) throw err;
-      throw new ProviderError(PROVIDER_ID, err?.message ?? String(err), {
-        status: err?.status ?? 502,
+      const friendly = parseOpenRouterError(err, useModel);
+      throw new ProviderError(PROVIDER_ID, friendly.message, {
+        status: friendly.status,
+        code: friendly.code,
         cause: err,
       });
     }
   },
 };
+
+/** Normaliza errores del SDK de OpenAI (que OpenRouter usa) a mensajes claros. */
+function parseOpenRouterError(err, model) {
+  const status = err?.status ?? err?.response?.status ?? 502;
+  const isFreeModel = /:free$/.test(model || '');
+
+  if (status === 429) {
+    return {
+      status: 429,
+      code: 'QUOTA_EXCEEDED',
+      message: isFreeModel
+        ? `Rate limit del modelo gratuito "${model}". Los modelos :free en OpenRouter están en cola compartida globalmente. Esperá 30-60s y reintentá, probá otro modelo :free, o agregá $5 de crédito en openrouter.ai/credits para acceso priority.`
+        : `Rate limit alcanzado en OpenRouter. Esperá unos segundos y reintentá.`,
+    };
+  }
+  if (status === 401 || status === 403) {
+    return {
+      status: 401,
+      code: 'INVALID_API_KEY',
+      message:
+        'API key de OpenRouter inválida o sin permisos. Verificá OPENROUTER_API_KEY en Railway.',
+    };
+  }
+  if (status === 402) {
+    return {
+      status: 402,
+      code: 'INSUFFICIENT_CREDITS',
+      message:
+        'OpenRouter: créditos insuficientes para este modelo. Agregá crédito en openrouter.ai/credits o usá un modelo :free.',
+    };
+  }
+  if (status === 404) {
+    return {
+      status: 404,
+      code: 'MODEL_NOT_FOUND',
+      message: `Modelo "${model}" no existe en OpenRouter. Verificá el ID exacto en openrouter.ai/models.`,
+    };
+  }
+  return {
+    status: status >= 400 && status < 600 ? status : 502,
+    code: 'PROVIDER_ERROR',
+    message: err?.message ?? String(err).slice(0, 500),
+  };
+}
