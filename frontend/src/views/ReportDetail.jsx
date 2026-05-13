@@ -5,9 +5,11 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { ExportButton } from '../components/ExportButton.jsx';
+import { NotesEditor } from '../components/NotesEditor.jsx';
+import { ScanTimer } from '../components/ScanTimer.jsx';
 import { ScoreGauge } from '../components/ScoreGauge.jsx';
 import { TestCard } from '../components/TestCard.jsx';
-import { getReport } from '../lib/api.js';
+import { getReport, getScan } from '../lib/api.js';
 
 const CATEGORY_LABEL = {
   functional: 'Funcional',
@@ -22,6 +24,7 @@ const CATEGORY_ORDER = ['functional', 'security', 'performance', 'accessibility'
 export function ReportDetail() {
   const { scanId } = useParams();
   const [report, setReport] = useState(null);
+  const [scanMeta, setScanMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -29,9 +32,14 @@ export function ReportDetail() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getReport(scanId)
-      .then((data) => {
-        if (!cancelled) setReport(data);
+    Promise.all([
+      getReport(scanId),
+      getScan(scanId).catch(() => null),
+    ])
+      .then(([reportData, scanData]) => {
+        if (cancelled) return;
+        setReport(reportData);
+        setScanMeta(scanData);
       })
       .catch((err) => {
         if (!cancelled) setError(err?.message ?? 'No se pudo cargar el reporte');
@@ -80,6 +88,16 @@ export function ReportDetail() {
             ID: {scan.id} · Status: {scan.status}
             {scan.completedAt ? ` · ${new Date(scan.completedAt).toLocaleString()}` : ''}
           </p>
+          {scanMeta?.startedAt ? (
+            <p className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+              <span className="uppercase tracking-widest">duración:</span>
+              <ScanTimer
+                startedAt={scanMeta.startedAt}
+                endedAt={scanMeta.completedAt}
+                status={scanMeta.status}
+              />
+            </p>
+          ) : null}
         </div>
         <div className="flex gap-2">
           <ExportButton scanId={scanId} format="json" label="Exportar JSON" />
@@ -132,6 +150,8 @@ export function ReportDetail() {
           </div>
         </section>
       ) : null}
+
+      <NotesEditor scanId={scanId} initialNotes={scanMeta?.notes ?? ''} />
 
       {visibleCategories.map((cat) => (
         <CategorySection

@@ -16,9 +16,11 @@ datasource db {
 model Scan {
   id          String    @id @default(cuid())
   url         String
-  status      String    @default("pending") // pending | running | completed | failed
+  status      String    @default("pending") // pending | running | completed | failed | cancelled
   stage       String? // etapa actual (SCAN_STAGE) — se actualiza durante el run
   errorMessage String?
+  notes       String? // notas libres de QA (Markdown), editables desde la UI
+  cancelRequestedAt DateTime? // si está seteado, el worker aborta el pipeline
   createdAt   DateTime  @default(now())
   startedAt   DateTime?
   completedAt DateTime?

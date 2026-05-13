@@ -1,11 +1,13 @@
 // Dashboard — muestra progreso y results en tiempo real para un scanId.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
+import { NotesEditor } from '../components/NotesEditor.jsx';
 import { ScanProgress } from '../components/ScanProgress.jsx';
+import { ScanTimer } from '../components/ScanTimer.jsx';
 import { TestCard } from '../components/TestCard.jsx';
-import { getScan } from '../lib/api.js';
+import { cancelScan, getScan } from '../lib/api.js';
 import { getSocket } from '../lib/socket.js';
 import { useScanStore } from '../store/scan.store.js';
 
@@ -29,12 +31,18 @@ export function Dashboard() {
     errorMessage,
     results,
     summary,
+    startedAt,
+    completedAt,
     startScan,
     applyProgress,
     appendResult,
     markCompleted,
     markFailed,
   } = useScanStore();
+
+  const [initialNotes, setInitialNotes] = useState('');
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState(null);
 
   // Si el usuario entra directo al link, hidratamos el store desde el backend.
   useEffect(() => {
@@ -44,7 +52,17 @@ export function Dashboard() {
       try {
         const data = await getScan(scanId);
         if (cancelled) return;
-        startScan({ scanId: data.id, url: data.url, status: data.status });
+        setInitialNotes(data.notes ?? '');
+        startScan({
+          scanId: data.id,
+          url: data.url,
+          status: data.status,
+          stage: data.stage,
+          message: stageToMessage(data.stage),
+          errorMessage: data.errorMessage,
+          startedAt: data.startedAt,
+          completedAt: data.completedAt,
+        });
         for (const result of data.results) {
           appendResult({
             id: result.id,
@@ -65,6 +83,21 @@ export function Dashboard() {
       cancelled = true;
     };
   }, [scanId, storedId, startScan, appendResult, markCompleted, markFailed]);
+
+  const handleStop = async () => {
+    if (!confirm('¿Cancelar el scan en curso? Los resultados parciales se conservan.')) return;
+    setStopping(true);
+    setStopError(null);
+    try {
+      await cancelScan(scanId);
+    } catch (err) {
+      setStopError(err?.response?.data?.message ?? err?.message ?? 'No se pudo cancelar');
+    } finally {
+      setStopping(false);
+    }
+  };
+
+  const canStop = status === 'running' || status === 'pending';
 
   // Suscripción Socket.io al room del scan.
   useEffect(() => {
@@ -103,10 +136,31 @@ export function Dashboard() {
           <h1 className="text-2xl font-bold text-slate-50 break-all">{url ?? scanId}</h1>
           <p className="mt-1 text-sm text-slate-500">ID: {scanId}</p>
         </div>
-        <StatusBadge status={status} />
+        <div className="flex flex-col items-end gap-2">
+          <StatusBadge status={status} />
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="uppercase tracking-widest">tiempo</span>
+            <ScanTimer startedAt={startedAt} endedAt={completedAt} status={status} />
+          </div>
+        </div>
       </header>
 
       <ScanProgress status={status} stage={stage} message={message} errorMessage={errorMessage} />
+
+      {canStop ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={handleStop}
+            disabled={stopping}
+            className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-sm font-medium text-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="stop-scan-btn"
+          >
+            {stopping ? 'Cancelando…' : '■ Detener scan'}
+          </button>
+          {stopError ? <span className="text-xs text-red-300">{stopError}</span> : null}
+        </div>
+      ) : null}
 
       {summary ? (
         <div
@@ -146,6 +200,8 @@ export function Dashboard() {
         </div>
       ) : null}
 
+      <NotesEditor scanId={scanId} initialNotes={initialNotes} />
+
       <div className="mt-8">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-widest text-slate-400">
           Resultados ({results.length})
@@ -166,6 +222,23 @@ export function Dashboard() {
   );
 }
 
+function stageToMessage(stage) {
+  const map = {
+    queued: 'Encolando scan',
+    launching_browser: 'Lanzando browser',
+    capturing_dom: 'Capturando DOM',
+    analyzing_headers: 'Analizando HTTP headers',
+    analyzing_ssl: 'Verificando certificado SSL',
+    analyzing_seo: 'Analizando SEO',
+    checking_links: 'Verificando links',
+    analyzing_accessibility: 'Analizando accesibilidad (axe-core)',
+    analyzing_performance: 'Consultando PageSpeed Insights',
+    generating_scripts: 'Generando scripts',
+    completed: 'Scan completado',
+  };
+  return map[stage] ?? null;
+}
+
 function StatusBadge({ status }) {
   const tones = {
     idle: 'bg-slate-700 text-slate-200',
@@ -173,6 +246,7 @@ function StatusBadge({ status }) {
     running: 'bg-blue-500/20 text-blue-300 border border-blue-500/40',
     completed: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40',
     failed: 'bg-red-500/15 text-red-300 border border-red-500/40',
+    cancelled: 'bg-amber-500/15 text-amber-300 border border-amber-500/40',
   };
   return (
     <span

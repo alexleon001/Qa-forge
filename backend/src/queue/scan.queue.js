@@ -153,6 +153,26 @@ export async function startScanWorker() {
 }
 
 
+/** Lee la flag de cancelación desde la DB. Si está seteada, abortamos. */
+async function isCancelled(scanId) {
+  const scan = await prisma.scan.findUnique({
+    where: { id: scanId },
+    select: { cancelRequestedAt: true, status: true },
+  });
+  return Boolean(scan?.cancelRequestedAt) || scan?.status === SCAN_STATUS.CANCELLED;
+}
+
+class ScanCancelledError extends Error {
+  constructor() {
+    super('Scan cancelado por el usuario');
+    this.name = 'ScanCancelledError';
+  }
+}
+
+async function checkCancellation(scanId) {
+  if (await isCancelled(scanId)) throw new ScanCancelledError();
+}
+
 /**
  * Pipeline de scan. Cada paso es independiente; un fallo se persiste como
  * Result `fail` y el pipeline continúa.
@@ -165,6 +185,8 @@ async function processScan(scanId) {
   }
 
   try {
+    // Si ya fue cancelado antes de arrancar.
+    await checkCancellation(scanId);
     await updateScanStatus(scanId, SCAN_STATUS.RUNNING, { startedAt: new Date() });
     emitProgress(scanId, { stage: SCAN_STAGE.QUEUED, message: 'Iniciando scan' });
 
@@ -185,6 +207,7 @@ async function processScan(scanId) {
     const captureData = pwResult.status === RESULT_STATUS.FAIL ? null : pwResult.data;
 
     // ─── 2) Headers de seguridad ─────────────────────────────────
+    await checkCancellation(scanId);
     emitStage(scanId, SCAN_STAGE.ANALYZING_HEADERS, 'Analizando HTTP headers');
     const headersResult = await safeRun(() => runHeadersCheck({ url: scan.url }));
     await persistResult(scanId, {
@@ -196,6 +219,7 @@ async function processScan(scanId) {
     const headersData = headersResult.error ? null : headersResult.data;
 
     // ─── 3) SSL/TLS ──────────────────────────────────────────────
+    await checkCancellation(scanId);
     emitStage(scanId, SCAN_STAGE.ANALYZING_SSL, 'Verificando certificado SSL');
     const sslResult = await safeRun(() => runSslCheck({ url: scan.url }));
     await persistResult(scanId, {
@@ -208,6 +232,7 @@ async function processScan(scanId) {
     const sslData = sslResult.error ? null : sslResult.data;
 
     // ─── 4) SEO analyzer (sobre captureData) ─────────────────────
+    await checkCancellation(scanId);
     if (captureData) {
       emitStage(scanId, SCAN_STAGE.ANALYZING_SEO, 'Analizando SEO');
       const seoResult = await safeRun(async () => analyzeSeo({ captureData }));
@@ -234,6 +259,7 @@ async function processScan(scanId) {
     }
 
     // ─── 6) Links analyzer (HEAD a cada link) ────────────────────
+    await checkCancellation(scanId);
     if (captureData) {
       emitStage(scanId, SCAN_STAGE.CHECKING_LINKS, 'Verificando links');
       const linksResult = await safeRun(() =>
@@ -260,6 +286,7 @@ async function processScan(scanId) {
     });
 
     // ─── 8) Accessibility (axe-core) ─────────────────────────────
+    await checkCancellation(scanId);
     emitStage(scanId, SCAN_STAGE.ANALYZING_ACCESSIBILITY, 'Analizando accesibilidad (axe-core)');
     const a11yResult = await safeRun(() => runAccessibilityCheck({ url: scan.url }));
     await persistResult(scanId, {
@@ -271,6 +298,7 @@ async function processScan(scanId) {
     });
 
     // ─── 9) PageSpeed Insights ───────────────────────────────────
+    await checkCancellation(scanId);
     emitStage(scanId, SCAN_STAGE.ANALYZING_PERFORMANCE, 'Consultando PageSpeed Insights');
     const psResult = await safeRun(() => runPageSpeedCheck({ url: scan.url }));
     await persistResult(scanId, {
@@ -290,6 +318,16 @@ async function processScan(scanId) {
     emitProgress(scanId, { stage: SCAN_STAGE.COMPLETED, message: 'Scan completado' });
     emitCompleted(scanId, summary);
   } catch (err) {
+    if (err instanceof ScanCancelledError) {
+      console.log(`[scan.queue] Scan ${scanId} cancelado por el usuario`);
+      await updateScanStatus(scanId, SCAN_STATUS.CANCELLED, {
+        completedAt: new Date(),
+        stage: SCAN_STAGE.COMPLETED,
+      });
+      emitProgress(scanId, { stage: 'cancelled', message: 'Scan cancelado' });
+      emitFailed(scanId, 'Scan cancelado por el usuario');
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[scan.queue] Scan ${scanId} falló:`, err);
     await updateScanStatus(scanId, SCAN_STATUS.FAILED, {

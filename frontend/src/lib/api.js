@@ -29,6 +29,18 @@ export async function listScans() {
   return data.scans;
 }
 
+/** Actualiza notas (u otros campos editables) de un scan. */
+export async function updateScan(scanId, patch) {
+  const { data } = await api.patch(`/api/scan/${scanId}`, patch);
+  return data;
+}
+
+/** Solicita la cancelación del scan en curso. */
+export async function cancelScan(scanId) {
+  const { data } = await api.post(`/api/scan/${scanId}/cancel`);
+  return data;
+}
+
 /**
  * Pide al backend que genere (o recupere) los 3 scripts del scan.
  * Opcionales: additionalCases, force, provider, model.

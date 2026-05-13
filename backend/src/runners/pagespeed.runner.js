@@ -15,7 +15,10 @@ export async function runPageSpeedCheck({ url, strategy = 'mobile' } = {}) {
     if (apiKey) params.set('key', apiKey);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45_000); // PageSpeed puede tardar
+    const timer = setTimeout(
+      () => controller.abort(),
+      DEFAULTS.PAGESPEED_TIMEOUT_MS,
+    );
     const response = await fetch(`${ENDPOINT}?${params.toString()}`, {
       method: 'GET',
       signal: controller.signal,

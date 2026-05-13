@@ -67,6 +67,56 @@ scanRouter.get('/:id', async (req, res, next) => {
   }
 });
 
+const patchScanSchema = z.object({
+  notes: z.string().max(20_000).optional().nullable(),
+});
+
+scanRouter.patch('/:id', async (req, res, next) => {
+  try {
+    const parse = patchScanSchema.safeParse(req.body ?? {});
+    if (!parse.success) {
+      throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
+    }
+    const data = {};
+    if (parse.data.notes !== undefined) data.notes = parse.data.notes;
+    if (Object.keys(data).length === 0) {
+      throw new HttpError(400, 'INVALID_INPUT', 'No hay campos para actualizar');
+    }
+    const scan = await prisma.scan.update({
+      where: { id: req.params.id },
+      data,
+      select: { id: true, notes: true },
+    });
+    res.json(scan);
+  } catch (err) {
+    if (err?.code === 'P2025') {
+      return next(new HttpError(404, 'SCAN_NOT_FOUND', 'Scan no encontrado'));
+    }
+    next(err);
+  }
+});
+
+scanRouter.post('/:id/cancel', async (req, res, next) => {
+  try {
+    const scan = await prisma.scan.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, status: true },
+    });
+    if (!scan) throw new HttpError(404, 'SCAN_NOT_FOUND', 'Scan no encontrado');
+    if (scan.status === SCAN_STATUS.COMPLETED || scan.status === SCAN_STATUS.FAILED) {
+      throw new HttpError(409, 'SCAN_FINISHED', 'El scan ya terminó');
+    }
+    const updated = await prisma.scan.update({
+      where: { id: req.params.id },
+      data: { cancelRequestedAt: new Date() },
+      select: { id: true, status: true, cancelRequestedAt: true },
+    });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
 scanRouter.get('/', async (_req, res, next) => {
   try {
     const scans = await prisma.scan.findMany({

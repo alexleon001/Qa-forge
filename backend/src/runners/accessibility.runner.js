@@ -28,7 +28,16 @@ export async function runAccessibilityCheck({ url } = {}) {
       'wcag21aa',
       'best-practice',
     ]);
-    const results = await axe.analyze();
+    // Timeout duro para axe — en DOMs grandes puede tardar mucho.
+    const results = await Promise.race([
+      axe.analyze(),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error('axe.analyze timeout')),
+          DEFAULTS.AXE_ANALYZE_TIMEOUT_MS,
+        ),
+      ),
+    ]);
 
     const byImpact = countBy(results.violations, 'impact');
     const totalViolations = results.violations.length;

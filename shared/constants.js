@@ -6,6 +6,7 @@ export const SCAN_STATUS = Object.freeze({
   RUNNING: 'running',
   COMPLETED: 'completed',
   FAILED: 'failed',
+  CANCELLED: 'cancelled',
 });
 
 /** Status de cada Result individual de runner/analyzer. */
@@ -83,7 +84,9 @@ export const SECURITY_HEADERS = Object.freeze([
 /** Timeouts y límites por defecto (sobreescribibles vía env). */
 export const DEFAULTS = Object.freeze({
   PLAYWRIGHT_TIMEOUT_MS: 30_000,
-  HTTP_REQUEST_TIMEOUT_MS: 15_000,
-  MAX_LINKS_TO_CHECK: 50,
+  HTTP_REQUEST_TIMEOUT_MS: 8_000,
+  MAX_LINKS_TO_CHECK: 30,
   MAX_CONCURRENT_SCANS: 2,
+  AXE_ANALYZE_TIMEOUT_MS: 20_000,
+  PAGESPEED_TIMEOUT_MS: 60_000,
 });
