@@ -23,10 +23,55 @@ function getClient() {
 }
 
 /**
- * Para strict mode OpenAI requiere additionalProperties: false en todos los
- * objects (lo cumplimos en el schema base) y que todas las properties estén
- * en `required`. Ya lo cumple el schema, así que no hace falta sanitizar.
+ * OpenAI strict mode (response_format: json_schema) impone reglas rígidas:
+ * 1. additionalProperties: false en todos los objects.
+ * 2. TODAS las properties deben estar en `required`. No hay "opcional" como tal.
+ * 3. Para simular opcional, el type debe ser union con null: ["string", "null"].
+ *
+ * Esta función toma un schema con required parcial y lo expande:
+ * - los properties que NO estaban en `required` original quedan agregados a
+ *   `required` pero con type union ["X", "null"].
+ * - aplicación recursiva (objects anidados, arrays.items).
  */
+function sanitizeSchemaForOpenAI(schema) {
+  if (schema == null || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) return schema.map(sanitizeSchemaForOpenAI);
+
+  const out = { ...schema };
+  if (out.type === 'object' && out.properties) {
+    const props = {};
+    const originalRequired = new Set(Array.isArray(out.required) ? out.required : []);
+    const allKeys = Object.keys(out.properties);
+
+    for (const key of allKeys) {
+      const subSchema = sanitizeSchemaForOpenAI(out.properties[key]);
+      if (!originalRequired.has(key)) {
+        // Convertir a nullable union: type puede ser string o array.
+        if (typeof subSchema.type === 'string') {
+          subSchema.type = [subSchema.type, 'null'];
+        } else if (Array.isArray(subSchema.type) && !subSchema.type.includes('null')) {
+          subSchema.type = [...subSchema.type, 'null'];
+        }
+      }
+      props[key] = subSchema;
+    }
+
+    out.properties = props;
+    out.required = allKeys; // strict exige todas
+    out.additionalProperties = false;
+  } else if (out.type === 'array' && out.items) {
+    out.items = sanitizeSchemaForOpenAI(out.items);
+  } else {
+    // Caso genérico: recursar en sub-valores.
+    for (const [k, v] of Object.entries(out)) {
+      if (v && typeof v === 'object') {
+        out[k] = sanitizeSchemaForOpenAI(v);
+      }
+    }
+  }
+  return out;
+}
+
 export const openaiProvider = {
   id: PROVIDER_ID,
   label: 'OpenAI',
@@ -51,7 +96,7 @@ export const openaiProvider = {
           json_schema: {
             name: 'qa_forge_scripts',
             strict: true,
-            schema,
+            schema: sanitizeSchemaForOpenAI(schema),
           },
         },
         max_tokens: 16_000,
@@ -75,10 +120,44 @@ export const openaiProvider = {
       };
     } catch (err) {
       if (err instanceof ProviderError) throw err;
-      throw new ProviderError(PROVIDER_ID, err?.message ?? String(err), {
-        status: err?.status ?? 502,
+      const friendly = parseOpenAIError(err);
+      throw new ProviderError(PROVIDER_ID, friendly.message, {
+        status: friendly.status,
+        code: friendly.code,
         cause: err,
       });
     }
   },
 };
+
+function parseOpenAIError(err) {
+  const status = err?.status ?? err?.response?.status ?? 502;
+  if (status === 429) {
+    return {
+      status: 429,
+      code: 'QUOTA_EXCEEDED',
+      message: 'Rate limit de OpenAI. Esperá unos segundos y reintentá.',
+    };
+  }
+  if (status === 401 || status === 403) {
+    return {
+      status: 401,
+      code: 'INVALID_API_KEY',
+      message:
+        'OPENAI_API_KEY inválida o sin permisos. Verificá en platform.openai.com/api-keys.',
+    };
+  }
+  if (status === 402 || /insufficient_quota/i.test(err?.message ?? '')) {
+    return {
+      status: 402,
+      code: 'INSUFFICIENT_CREDITS',
+      message:
+        'Créditos OpenAI agotados. Cargá saldo en platform.openai.com/account/billing.',
+    };
+  }
+  return {
+    status: status >= 400 && status < 600 ? status : 502,
+    code: 'PROVIDER_ERROR',
+    message: err?.message ?? String(err).slice(0, 500),
+  };
+}
