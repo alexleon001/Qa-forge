@@ -8,7 +8,7 @@ const CONCURRENCY = 8;
 /**
  * @param {{ captureData: any, baseUrl: string }} input
  */
-export async function analyzeLinks({ captureData, baseUrl } = {}) {
+export async function analyzeLinks({ captureData, baseUrl, scanCtx } = {}) {
   if (!captureData?.links?.length) {
     return {
       status: RESULT_STATUS.INFO,
@@ -37,7 +37,9 @@ export async function analyzeLinks({ captureData, baseUrl } = {}) {
   }
 
   const toCheck = resolved.slice(0, DEFAULTS.MAX_LINKS_TO_CHECK);
-  const results = await runWithConcurrency(toCheck, CONCURRENCY, checkLink);
+  const results = await runWithConcurrency(toCheck, CONCURRENCY, (link) =>
+    checkLink(link, scanCtx),
+  );
 
   const broken = results.filter((r) => r.status === 'broken' || (r.httpStatus && r.httpStatus >= 400));
   const slowOrRedirected = results.filter((r) => r.httpStatus >= 300 && r.httpStatus < 400);
@@ -60,9 +62,11 @@ export async function analyzeLinks({ captureData, baseUrl } = {}) {
   };
 }
 
-async function checkLink(link) {
+async function checkLink(link, scanCtx) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DEFAULTS.HTTP_REQUEST_TIMEOUT_MS);
+  const onCancel = () => controller.abort();
+  scanCtx?.signal?.addEventListener('abort', onCancel, { once: true });
   try {
     // HEAD primero; si no soporta, fallback a GET.
     let response = await fetch(link.absolute, {
@@ -97,6 +101,7 @@ async function checkLink(link) {
     };
   } finally {
     clearTimeout(timer);
+    scanCtx?.signal?.removeEventListener?.('abort', onCancel);
   }
 }
 

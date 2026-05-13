@@ -5,9 +5,9 @@ import { chromium } from 'playwright';
 import { DEFAULTS, RESULT_STATUS } from '../../../shared/constants.js';
 
 /**
- * @param {{ url: string, onStage?: (stage: string) => void }} opts
+ * @param {{ url: string, onStage?: (stage: string) => void, scanCtx?: import('../queue/scan.queue.js').ScanContext }} opts
  */
-export async function runPlaywrightCapture({ url, onStage } = {}) {
+export async function runPlaywrightCapture({ url, onStage, scanCtx } = {}) {
   let browser;
   try {
     onStage?.('launching_browser');
@@ -15,6 +15,13 @@ export async function runPlaywrightCapture({ url, onStage } = {}) {
     // Usar el canal `chrome` o `msedge` evita el binario problemático.
     const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
     browser = await chromium.launch({ headless: true, channel });
+    // Permitir cancelación: si llega un cancel, cerramos el browser y page.goto
+    // termina con error inmediato en vez de esperar el timeout completo.
+    scanCtx?.registerCleanup(async () => {
+      try {
+        await browser?.close();
+      } catch {}
+    });
     const context = await browser.newContext({
       userAgent:
         'Mozilla/5.0 (compatible; QAForgeBot/0.1; +https://github.com/qa-forge)',

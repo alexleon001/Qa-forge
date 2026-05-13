@@ -5,7 +5,10 @@ import { RESULT_STATUS } from '../../../shared/constants.js';
 
 const SSL_TIMEOUT_MS = 10_000;
 
-export async function runSslCheck({ url } = {}) {
+export async function runSslCheck({ url, scanCtx } = {}) {
+  // El scanCtx no se usa directamente — ssl-checker no expone signal — pero
+  // el timeout duro de Promise.race garantiza que el runner termine en ≤10s.
+  void scanCtx;
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:') {

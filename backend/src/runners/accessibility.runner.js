@@ -5,11 +5,16 @@ import { chromium } from 'playwright';
 
 import { DEFAULTS, RESULT_STATUS } from '../../../shared/constants.js';
 
-export async function runAccessibilityCheck({ url } = {}) {
+export async function runAccessibilityCheck({ url, scanCtx } = {}) {
   let browser;
   try {
     const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
     browser = await chromium.launch({ headless: true, channel });
+    scanCtx?.registerCleanup(async () => {
+      try {
+        await browser?.close();
+      } catch {}
+    });
     const context = await browser.newContext({
       userAgent: 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
       viewport: { width: 1366, height: 768 },

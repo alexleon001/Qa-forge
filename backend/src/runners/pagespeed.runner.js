@@ -7,7 +7,7 @@ import { DEFAULTS, RESULT_STATUS } from '../../../shared/constants.js';
 const ENDPOINT = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed';
 const CATEGORIES = ['PERFORMANCE', 'ACCESSIBILITY', 'BEST_PRACTICES', 'SEO'];
 
-export async function runPageSpeedCheck({ url, strategy = 'mobile' } = {}) {
+export async function runPageSpeedCheck({ url, strategy = 'mobile', scanCtx } = {}) {
   try {
     const params = new URLSearchParams({ url, strategy });
     for (const cat of CATEGORIES) params.append('category', cat);
@@ -19,11 +19,15 @@ export async function runPageSpeedCheck({ url, strategy = 'mobile' } = {}) {
       () => controller.abort(),
       DEFAULTS.PAGESPEED_TIMEOUT_MS,
     );
+    const onCancel = () => controller.abort();
+    scanCtx?.signal?.addEventListener('abort', onCancel, { once: true });
+
     const response = await fetch(`${ENDPOINT}?${params.toString()}`, {
       method: 'GET',
       signal: controller.signal,
     });
     clearTimeout(timer);
+    scanCtx?.signal?.removeEventListener?.('abort', onCancel);
 
     if (!response.ok) {
       const body = await response.text();

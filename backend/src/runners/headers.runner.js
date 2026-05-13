@@ -3,13 +3,16 @@
 
 import { DEFAULTS, RESULT_STATUS, SECURITY_HEADERS } from '../../../shared/constants.js';
 
-export async function runHeadersCheck({ url } = {}) {
+export async function runHeadersCheck({ url, scanCtx } = {}) {
   try {
     const controller = new AbortController();
     const timer = setTimeout(
       () => controller.abort(),
       DEFAULTS.HTTP_REQUEST_TIMEOUT_MS,
     );
+    // Si llega cancel del usuario, abortar el fetch.
+    const onCancel = () => controller.abort();
+    scanCtx?.signal?.addEventListener('abort', onCancel, { once: true });
 
     // HEAD a veces falla, así que probamos GET con redirects.
     const response = await fetch(url, {
@@ -21,6 +24,7 @@ export async function runHeadersCheck({ url } = {}) {
       },
     });
     clearTimeout(timer);
+    scanCtx?.signal?.removeEventListener?.('abort', onCancel);
 
     const headers = Object.fromEntries(response.headers.entries());
 

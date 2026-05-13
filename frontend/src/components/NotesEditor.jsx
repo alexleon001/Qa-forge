@@ -1,4 +1,4 @@
-// Editor de notas de QA con auto-save (debounce 800ms).
+// Editor de notas de QA con auto-save (debounce 800ms). Colapsable.
 
 import { useEffect, useRef, useState } from 'react';
 
@@ -6,7 +6,10 @@ import { updateScan } from '../lib/api.js';
 
 const SAVE_DEBOUNCE_MS = 800;
 
-export function NotesEditor({ scanId, initialNotes }) {
+export function NotesEditor({ scanId, initialNotes, defaultOpen }) {
+  const hasInitial = Boolean((initialNotes ?? '').trim());
+  // Default abierto si ya hay notas escritas, o si el caller lo fuerza.
+  const [open, setOpen] = useState(defaultOpen ?? hasInitial);
   const [value, setValue] = useState(initialNotes ?? '');
   const [savedAt, setSavedAt] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -18,6 +21,9 @@ export function NotesEditor({ scanId, initialNotes }) {
   useEffect(() => {
     setValue(initialNotes ?? '');
     lastSavedRef.current = initialNotes ?? '';
+    // Si llegan notas previas y estaba colapsado vacío, expandir.
+    if ((initialNotes ?? '').trim() && !open) setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scanId, initialNotes]);
 
   useEffect(() => {
@@ -40,25 +46,49 @@ export function NotesEditor({ scanId, initialNotes }) {
     return () => clearTimeout(timerRef.current);
   }, [value, scanId]);
 
+  const charCount = value.length;
+  const hasContent = charCount > 0;
+
   return (
-    <section className="mt-8 rounded-xl border border-slate-800/70 bg-slate-900/40 p-5">
-      <header className="mb-3 flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-300">
-          Notas de QA
-        </h2>
+    <section className="mt-8 overflow-hidden rounded-xl border border-slate-800/70 bg-slate-900/40">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-slate-900/70"
+        aria-expanded={open}
+        data-testid="notes-toggle"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-slate-400">{open ? '▾' : '▸'}</span>
+          <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-300">
+            Notas de QA
+          </h2>
+          {hasContent ? (
+            <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-emerald-300">
+              {charCount} {charCount === 1 ? 'carácter' : 'caracteres'}
+            </span>
+          ) : (
+            <span className="text-xs italic text-slate-500">vacío</span>
+          )}
+        </div>
         <SaveStatus saving={saving} savedAt={savedAt} error={error} />
-      </header>
-      <textarea
-        rows={6}
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="Observaciones, bugs detectados, pasos a reproducir, contexto del scan…"
-        className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-        data-testid="notes-editor"
-      />
-      <p className="mt-2 text-xs text-slate-500">
-        Auto-guardado · soporta texto libre. Máx 20.000 caracteres.
-      </p>
+      </button>
+
+      {open ? (
+        <div className="border-t border-slate-800/70 p-5">
+          <textarea
+            rows={6}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Observaciones, bugs detectados, pasos a reproducir, contexto del scan…"
+            className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            data-testid="notes-editor"
+          />
+          <p className="mt-2 text-xs text-slate-500">
+            Auto-guardado · soporta texto libre. Máx 20.000 caracteres.
+          </p>
+        </div>
+      ) : null}
     </section>
   );
 }

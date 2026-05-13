@@ -162,15 +162,75 @@ async function isCancelled(scanId) {
   return Boolean(scan?.cancelRequestedAt) || scan?.status === SCAN_STATUS.CANCELLED;
 }
 
-class ScanCancelledError extends Error {
+export class ScanCancelledError extends Error {
   constructor() {
     super('Scan cancelado por el usuario');
     this.name = 'ScanCancelledError';
   }
 }
 
-async function checkCancellation(scanId) {
-  if (await isCancelled(scanId)) throw new ScanCancelledError();
+/**
+ * Contexto compartido por todos los runners de un scan. Permite cancelación
+ * agresiva mid-flight: el watcher hace polling de cancelRequestedAt en DB
+ * cada 1.5s; cuando detecta cancel, dispara abort() + ejecuta cleanups
+ * (ej. browser.close()) para cortar runners bloqueados.
+ */
+export class ScanContext {
+  constructor(scanId) {
+    this.scanId = scanId;
+    this.controller = new AbortController();
+    this.cleanups = [];
+    this.pollerId = null;
+    this.cancelled = false;
+  }
+  get signal() {
+    return this.controller.signal;
+  }
+  registerCleanup(fn) {
+    this.cleanups.push(fn);
+  }
+  startPolling() {
+    if (this.pollerId) return;
+    this.pollerId = setInterval(async () => {
+      try {
+        if (await isCancelled(this.scanId)) {
+          await this.forceCancel();
+        }
+      } catch (err) {
+        console.error(`[scan.queue] watcher error scan=${this.scanId}:`, err.message);
+      }
+    }, 1500);
+  }
+  stopPolling() {
+    if (this.pollerId) clearInterval(this.pollerId);
+    this.pollerId = null;
+  }
+  async forceCancel() {
+    if (this.cancelled) return;
+    this.cancelled = true;
+    this.stopPolling();
+    console.log(`[scan.queue] Forzando cancelación de scan ${this.scanId}`);
+    try {
+      this.controller.abort(new ScanCancelledError());
+    } catch {}
+    const fns = this.cleanups.slice().reverse();
+    this.cleanups = [];
+    for (const fn of fns) {
+      try {
+        await fn();
+      } catch (err) {
+        console.error(`[scan.queue] cleanup error scan=${this.scanId}:`, err?.message);
+      }
+    }
+  }
+}
+
+async function checkCancellation(ctx) {
+  if (ctx.cancelled || ctx.signal.aborted) throw new ScanCancelledError();
+  if (await isCancelled(ctx.scanId)) {
+    await ctx.forceCancel();
+    throw new ScanCancelledError();
+  }
 }
 
 /**
@@ -184,19 +244,37 @@ async function processScan(scanId) {
     return;
   }
 
+  const ctx = new ScanContext(scanId);
+  const totalStart = Date.now();
+  const stageTimes = {};
+
+  async function timed(name, fn) {
+    const start = Date.now();
+    try {
+      return await fn();
+    } finally {
+      const ms = Date.now() - start;
+      stageTimes[name] = ms;
+      console.log(`[scan.queue] scan=${scanId} stage=${name} duration=${ms}ms`);
+    }
+  }
+
   try {
-    // Si ya fue cancelado antes de arrancar.
-    await checkCancellation(scanId);
+    await checkCancellation(ctx);
     await updateScanStatus(scanId, SCAN_STATUS.RUNNING, { startedAt: new Date() });
     emitProgress(scanId, { stage: SCAN_STAGE.QUEUED, message: 'Iniciando scan' });
+    ctx.startPolling();
 
     // ─── 1) Playwright: captura DOM/screenshot/links/forms/meta ──
-    const pwResult = await safeRun(() =>
-      runPlaywrightCapture({
-        url: scan.url,
-        onStage: (stage) =>
-          emitProgress(scanId, { stage, message: `Playwright: ${stage}` }),
-      }),
+    const pwResult = await timed('playwright.capture', () =>
+      safeRun(() =>
+        runPlaywrightCapture({
+          url: scan.url,
+          scanCtx: ctx,
+          onStage: (stage) =>
+            emitProgress(scanId, { stage, message: `Playwright: ${stage}` }),
+        }),
+      ),
     );
     await persistResult(scanId, {
       category: TEST_CATEGORY.FUNCTIONAL,
@@ -207,9 +285,11 @@ async function processScan(scanId) {
     const captureData = pwResult.status === RESULT_STATUS.FAIL ? null : pwResult.data;
 
     // ─── 2) Headers de seguridad ─────────────────────────────────
-    await checkCancellation(scanId);
+    await checkCancellation(ctx);
     emitStage(scanId, SCAN_STAGE.ANALYZING_HEADERS, 'Analizando HTTP headers');
-    const headersResult = await safeRun(() => runHeadersCheck({ url: scan.url }));
+    const headersResult = await timed('headers', () =>
+      safeRun(() => runHeadersCheck({ url: scan.url, scanCtx: ctx })),
+    );
     await persistResult(scanId, {
       category: TEST_CATEGORY.SECURITY,
       testName: 'security.headers',
@@ -219,9 +299,11 @@ async function processScan(scanId) {
     const headersData = headersResult.error ? null : headersResult.data;
 
     // ─── 3) SSL/TLS ──────────────────────────────────────────────
-    await checkCancellation(scanId);
+    await checkCancellation(ctx);
     emitStage(scanId, SCAN_STAGE.ANALYZING_SSL, 'Verificando certificado SSL');
-    const sslResult = await safeRun(() => runSslCheck({ url: scan.url }));
+    const sslResult = await timed('ssl', () =>
+      safeRun(() => runSslCheck({ url: scan.url, scanCtx: ctx })),
+    );
     await persistResult(scanId, {
       category: TEST_CATEGORY.SECURITY,
       testName: 'security.ssl',
@@ -232,10 +314,12 @@ async function processScan(scanId) {
     const sslData = sslResult.error ? null : sslResult.data;
 
     // ─── 4) SEO analyzer (sobre captureData) ─────────────────────
-    await checkCancellation(scanId);
+    await checkCancellation(ctx);
     if (captureData) {
       emitStage(scanId, SCAN_STAGE.ANALYZING_SEO, 'Analizando SEO');
-      const seoResult = await safeRun(async () => analyzeSeo({ captureData }));
+      const seoResult = await timed('seo', () =>
+        safeRun(async () => analyzeSeo({ captureData })),
+      );
       await persistResult(scanId, {
         category: TEST_CATEGORY.SEO,
         testName: 'seo.analyzer',
@@ -247,8 +331,8 @@ async function processScan(scanId) {
 
     // ─── 5) Forms analyzer ───────────────────────────────────────
     if (captureData) {
-      const formsResult = await safeRun(async () =>
-        analyzeForms({ captureData, baseUrl: scan.url }),
+      const formsResult = await timed('forms', () =>
+        safeRun(async () => analyzeForms({ captureData, baseUrl: scan.url })),
       );
       await persistResult(scanId, {
         category: TEST_CATEGORY.FUNCTIONAL,
@@ -259,11 +343,11 @@ async function processScan(scanId) {
     }
 
     // ─── 6) Links analyzer (HEAD a cada link) ────────────────────
-    await checkCancellation(scanId);
+    await checkCancellation(ctx);
     if (captureData) {
       emitStage(scanId, SCAN_STAGE.CHECKING_LINKS, 'Verificando links');
-      const linksResult = await safeRun(() =>
-        analyzeLinks({ captureData, baseUrl: scan.url }),
+      const linksResult = await timed('links', () =>
+        safeRun(() => analyzeLinks({ captureData, baseUrl: scan.url, scanCtx: ctx })),
       );
       await persistResult(scanId, {
         category: TEST_CATEGORY.FUNCTIONAL,
@@ -274,8 +358,8 @@ async function processScan(scanId) {
     }
 
     // ─── 7) Security analyzer (score combinado) ──────────────────
-    const securityResult = await safeRun(async () =>
-      analyzeSecurity({ url: scan.url, headersData, sslData }),
+    const securityResult = await timed('security.score', () =>
+      safeRun(async () => analyzeSecurity({ url: scan.url, headersData, sslData })),
     );
     await persistResult(scanId, {
       category: TEST_CATEGORY.SECURITY,
@@ -286,9 +370,11 @@ async function processScan(scanId) {
     });
 
     // ─── 8) Accessibility (axe-core) ─────────────────────────────
-    await checkCancellation(scanId);
+    await checkCancellation(ctx);
     emitStage(scanId, SCAN_STAGE.ANALYZING_ACCESSIBILITY, 'Analizando accesibilidad (axe-core)');
-    const a11yResult = await safeRun(() => runAccessibilityCheck({ url: scan.url }));
+    const a11yResult = await timed('accessibility', () =>
+      safeRun(() => runAccessibilityCheck({ url: scan.url, scanCtx: ctx })),
+    );
     await persistResult(scanId, {
       category: TEST_CATEGORY.ACCESSIBILITY,
       testName: 'accessibility.axe',
@@ -298,9 +384,11 @@ async function processScan(scanId) {
     });
 
     // ─── 9) PageSpeed Insights ───────────────────────────────────
-    await checkCancellation(scanId);
+    await checkCancellation(ctx);
     emitStage(scanId, SCAN_STAGE.ANALYZING_PERFORMANCE, 'Consultando PageSpeed Insights');
-    const psResult = await safeRun(() => runPageSpeedCheck({ url: scan.url }));
+    const psResult = await timed('pagespeed', () =>
+      safeRun(() => runPageSpeedCheck({ url: scan.url, scanCtx: ctx })),
+    );
     await persistResult(scanId, {
       category: TEST_CATEGORY.PERFORMANCE,
       testName: 'performance.pagespeed',
@@ -310,6 +398,7 @@ async function processScan(scanId) {
     });
 
     // ─── Cierre ──────────────────────────────────────────────────
+    await checkCancellation(ctx);
     await updateScanStatus(scanId, SCAN_STATUS.COMPLETED, {
       completedAt: new Date(),
       stage: SCAN_STAGE.COMPLETED,
@@ -317,8 +406,11 @@ async function processScan(scanId) {
     const summary = await buildSummary(scanId);
     emitProgress(scanId, { stage: SCAN_STAGE.COMPLETED, message: 'Scan completado' });
     emitCompleted(scanId, summary);
+    console.log(
+      `[scan.queue] scan=${scanId} TOTAL=${Date.now() - totalStart}ms stages=${JSON.stringify(stageTimes)}`,
+    );
   } catch (err) {
-    if (err instanceof ScanCancelledError) {
+    if (err instanceof ScanCancelledError || err?.name === 'AbortError') {
       console.log(`[scan.queue] Scan ${scanId} cancelado por el usuario`);
       await updateScanStatus(scanId, SCAN_STATUS.CANCELLED, {
         completedAt: new Date(),
@@ -335,6 +427,8 @@ async function processScan(scanId) {
       errorMessage: message,
     });
     emitFailed(scanId, message);
+  } finally {
+    ctx.stopPolling();
   }
 }
 
