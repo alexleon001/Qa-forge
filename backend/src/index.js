@@ -63,8 +63,10 @@ startScanWorker().catch((err) => {
   console.error('[index] No se pudo iniciar el scan worker:', err);
 });
 
-httpServer.listen(PORT, () => {
-  console.log(`[qa-forge] Backend escuchando en http://localhost:${PORT}`);
+// Bind a 0.0.0.0 (todas las interfaces) — requerido por Railway/Render/Fly
+// para que el healthcheck externo llegue al proceso.
+httpServer.listen(PORT, '0.0.0.0', () => {
+  console.log(`[qa-forge] Backend escuchando en http://0.0.0.0:${PORT}`);
   console.log(
     `[qa-forge] CORS permitido para: ${FRONTEND_URLS.join(', ')}${
       ALLOW_VERCEL_PREVIEWS ? ' + *.vercel.app' : ''
