@@ -25,7 +25,6 @@
     "express": "^4.21.2",
     "playwright": "^1.49.1",
     "socket.io": "^4.8.1",
-    "ssl-checker": "^2.0.10",
     "zod": "^3.24.1"
   },
   "devDependencies": {

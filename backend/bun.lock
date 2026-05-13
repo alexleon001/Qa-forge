@@ -17,7 +17,6 @@
         "openai": "^4.96.0",
         "playwright": "^1.49.1",
         "socket.io": "^4.8.1",
-        "ssl-checker": "^2.0.10",
         "zod": "^3.24.1",
       },
       "devDependencies": {
@@ -353,8 +352,6 @@
     "socket.io-adapter": ["socket.io-adapter@2.5.6", "", { "dependencies": { "debug": "~4.4.1", "ws": "~8.18.3" } }, "sha512-DkkO/dz7MGln0dHn5bmN3pPy+JmywNICWrJqVWiVOyvXjWQFIv9c2h24JrQLLFJ2aQVQf/Cvl1vblnd4r2apLQ=="],
 
     "socket.io-parser": ["socket.io-parser@4.2.6", "", { "dependencies": { "@socket.io/component-emitter": "~3.1.0", "debug": "~4.4.1" } }, "sha512-asJqbVBDsBCJx0pTqw3WfesSY0iRX+2xzWEWzrpcH7L6fLzrhyF8WPI8UaeM4YCuDfpwA/cgsdugMsmtz8EJeg=="],
-
-    "ssl-checker": ["ssl-checker@2.0.10", "", {}, "sha512-SS6rrZocToJWHM1p6iVNb583ybB3UqT1fymCHSWuEdXDUqKA6O1D5Fb8KJVmhj3XKXE82IEWcr+idJrc4jUzFQ=="],
 
     "standard-as-callback": ["standard-as-callback@2.1.0", "", {}, "sha512-qoRRSyROncaz1z0mvYqIE4lCd9p2R90i6GxW3uZv5ucSu8tU7B5HXUP1gG8pVZsYNVaXjk8ClXHPttLyxAL48A=="],
 

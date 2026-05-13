@@ -6,6 +6,16 @@ import cors from 'cors';
 import express from 'express';
 import { Server as SocketIOServer } from 'socket.io';
 
+// Safety nets: errores asíncronos sin handler local NO deben matar el process.
+// Sin esto, un crash en cualquier runner (ej. ssl-checker incompatible con Bun)
+// reinicia el container y BullMQ reintenta indefinidamente.
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
 import { errorHandler, notFoundHandler } from './api/middlewares/error.middleware.js';
 import { manualCasesRouter } from './api/routes/manualcases.routes.js';
 import { reportRouter } from './api/routes/report.routes.js';
