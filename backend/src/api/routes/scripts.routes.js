@@ -22,11 +22,11 @@ const generateBodySchema = z.object({
 
 /**
  * GET /api/scripts/providers
- * Lista los providers disponibles y cuáles están configurados.
+ * Lista los providers disponibles y cuáles están configurados (env o user).
  */
-scriptsRouter.get('/providers', async (_req, res, next) => {
+scriptsRouter.get('/providers', async (req, res, next) => {
   try {
-    const items = await listProvidersStatus();
+    const items = await listProvidersStatus({ userId: req.user?.id });
     res.json({
       providers: items,
       defaultProvider:
@@ -58,6 +58,7 @@ scriptsRouter.post('/:scanId', async (req, res, next) => {
       force: parse.data.force ?? false,
       provider: parse.data.provider ?? null,
       model: parse.data.model ?? null,
+      userId: req.user?.id ?? null,
     });
 
     res.status(result.cached ? 200 : 201).json({

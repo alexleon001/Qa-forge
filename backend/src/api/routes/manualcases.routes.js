@@ -42,6 +42,7 @@ manualCasesRouter.post('/:scanId', async (req, res, next) => {
       force: parse.data.force ?? false,
       provider: parse.data.provider ?? null,
       model: parse.data.model ?? null,
+      userId: req.user?.id ?? null,
     });
 
     res.status(result.cached ? 200 : 201).json({

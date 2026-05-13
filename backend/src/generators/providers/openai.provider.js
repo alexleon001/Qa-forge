@@ -9,7 +9,8 @@ const PROVIDER_ID = 'openai';
 const DEFAULT_MODEL = process.env.AI_MODEL_OPENAI || 'gpt-4o-mini';
 
 let clientRef = null;
-function getClient() {
+function getClient(runtimeApiKey) {
+  if (runtimeApiKey) return new OpenAI({ apiKey: runtimeApiKey });
   if (clientRef) return clientRef;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -81,8 +82,8 @@ export const openaiProvider = {
     return Boolean(process.env.OPENAI_API_KEY);
   },
 
-  async generateStructured({ system, user, schema, model }) {
-    const client = getClient();
+  async generateStructured({ system, user, schema, model, apiKey }) {
+    const client = getClient(apiKey);
     const useModel = model || DEFAULT_MODEL;
     try {
       const completion = await client.chat.completions.create({

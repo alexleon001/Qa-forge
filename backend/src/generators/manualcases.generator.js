@@ -223,6 +223,7 @@ export async function generateManualCasesForScan({
   force = false,
   provider: requestedProviderId = null,
   model: requestedModel = null,
+  userId = null,
 } = {}) {
   const scan = await prisma.scan.findUnique({
     where: { id: scanId },
@@ -252,7 +253,10 @@ export async function generateManualCasesForScan({
     throw err;
   }
 
-  const provider = await resolveProvider({ requestedId: requestedProviderId });
+  const { provider, apiKey } = await resolveProvider({
+    requestedId: requestedProviderId,
+    userId,
+  });
   const captureData = parseDetails(captureResult.details);
   const captureSummary = summarizeCapture(captureData);
 
@@ -261,6 +265,7 @@ export async function generateManualCasesForScan({
     user: buildUserMessage({ scan, captureSummary, additionalCases }),
     schema: MANUAL_OUTPUT_SCHEMA,
     model: requestedModel,
+    apiKey,
   });
 
   const parsed = result.parsed;

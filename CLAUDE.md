@@ -202,8 +202,12 @@ ninguna de esas cosas, por eso el split.
 
 ## Estado actual
 
-> **Última fase completada:** FASE 6 — Casos de prueba manuales con IA
-> **Última sesión:** 2026-05-13 (FASE 6 + setup de deploy Railway/Vercel)
+> **Última fase completada:** FASE 6 + Deploy prod + Mejoras UX + Roadmap FASE 7
+> **Última sesión:** 2026-05-13 (sesión maratónica: deploy, fixes críticos, prompts pro)
+>
+> **Audiencia**: uso personal del owner + equipo chico de QA. **No comercial** (por ahora).
+> Si en el futuro pivota a vender: ver [[project-future-auth-apikeys]] y el roadmap de FASE 7
+> abajo, que sirve como base multi-user → multi-tenant.
 
 ### Implementado
 
@@ -358,14 +362,111 @@ ninguna de esas cosas, por eso el split.
 - ✅ `railway.toml` en la raíz (build via `backend/Dockerfile`, healthcheck `/api/health`)
 - ✅ `frontend/vercel.json` (build con Vite + SPA rewrites)
 - ✅ docker-compose: postgres movido fuera del profile `full` para dev local
+- ✅ Bind `0.0.0.0` + `preDeployCommand` separado de `startCommand` (Railway exec form, no shell)
+- ✅ Healthcheck timeout 300s para el primer `prisma db push` contra Postgres fresco
+- ✅ Bump Playwright image a `v1.60.0-jammy` (matchea el npm `playwright` que viene en bun.lock)
+
+**Producción live**:
+- Frontend: https://qaforge-chi.vercel.app
+- Backend: Railway service `Qa-forge` con plugins Postgres + Redis
+
+### Sesión 2026-05-13 (post-deploy) — Mejoras UX + bugs críticos
+
+**Features nuevas**
+- ✅ `ScanTimer` component: elapsed live mientras running, total al terminar
+- ✅ Notas de QA (`NotesEditor` con auto-save debounced 800ms, **colapsable**) —
+  campo `notes` en Scan, endpoint `PATCH /api/scan/:id`
+- ✅ Botón **STOP** — endpoint `POST /api/scan/:id/cancel` + status `cancelled`
+  + nuevo `ScanContext` con AbortController + watcher poll cada 1.5s
+- ✅ Cancelación agresiva mid-flight: cierra Playwright browser, aborta fetch
+  de pagespeed/links/headers via signal compartido
+- ✅ Logs de duración por etapa: `stage=playwright.capture duration=8123ms` etc.
+- ✅ Favicon SVG verde "QA" + theme-color emerald
+- ✅ Hidratación correcta del Dashboard al refrescar (stage + message + errorMessage
+  + startedAt/completedAt vienen del backend)
+
+**Bugs críticos resueltos**
+- 🐛 **`ssl-checker` incompatible con Bun** — usaba `https.request → res.socket.getPeerCertificate()`
+  que en Bun no existe. El TypeError salía async fuera del try/catch y mataba el process →
+  Railway reiniciaba container → BullMQ retry infinito → `job stalled more than allowable limit`.
+  **Fix**: `ssl.runner.js` reescrito con `node:tls.connect()` directo (compat con Bun).
+- 🛡️ **Safety nets globales**: `process.on('uncaughtException')` + `('unhandledRejection')` en
+  `index.js` — log pero NO matan el process. Previene futuros restart loops.
+- ⏱️ **SSL timeout** duro de 10s vía Promise.race (handshake colgaba indefinido en sitios lentos)
+- ⏱️ **Axe analyze timeout** duro de 20s (DOMs grandes lo colgaban)
+- ⏱️ **Frontend axios** ahora tiene 2 clientes: `api` (30s) para REST normal,
+  `aiApi` (180s) para `/api/scripts` y `/api/manual-cases` (LLMs free pueden tardar)
+- 🔢 `HTTP_REQUEST_TIMEOUT_MS`: 15s → 8s
+- 🔢 `MAX_LINKS_TO_CHECK`: 50 → 30
+- 🔢 `PAGESPEED_TIMEOUT_MS`: 45s → 60s (constante)
+
+**Providers — UX de errores**
+- ✅ `gemini.provider.js`: `parseGeminiError` mapea 429/401 a códigos HTTP correctos
+  con mensaje friendly (cuota agotada, regenerar key, cambiar provider)
+- ✅ `openrouter.provider.js`: parser similar para 429/401/402/404 — explicita rate
+  limit en modelos `:free`, link a comprar crédito
+- ✅ `openai.provider.js`: parser 429/401/402 + **`sanitizeSchemaForOpenAI`** —
+  strict mode requiere todas las properties en `required`; los opcionales se
+  convierten a union nullable `["X", "null"]` recursivamente
+- ✅ ScriptGenerator y ManualCases manejan status 429 / 401 con mensajes específicos
+
+**Prompts pro (2026-05-13)**
+- ✅ `script.generator.js` SYSTEM_PROMPT reescrito: 6-10 tests por framework
+  (vs 3-4 antes), cobertura de auth/navegación/forms negativos/búsqueda/ecommerce,
+  selectores en orden de preferencia, async/await + waits explícitos, imports
+  por framework documentados
+- ✅ `manualcases.generator.js` SYSTEM_PROMPT reescrito: 15-25 casos detallados
+  (vs ~9 antes), cobertura mínima explícita por categoría con counts:
+  - Funcional: 6-10 (login con XSS/SQLi/empty, búsqueda, carrito, navegación...)
+  - Seguridad: 4-6 (headers, rel=noopener, cookies, rate-limit login)
+  - A11y: 3-5 (teclado, screen readers, zoom 200%)
+  - Performance: 2-3 (load < 3s en 4G, lazy loading)
+  - SEO: 2-3 (title/meta/OG, sitemap, H1 único)
+- Recomendado: con `gpt-4o` (no `gpt-4o-mini`) el seguimiento de instrucciones largas
+  es notablemente mejor. `AI_MODEL_OPENAI=gpt-4o` en Railway.
+
+### FASE 7 — Roadmap acordado (uso personal + equipo chico)
+
+> Pedido del usuario (2026-05-13): construir QA Forge para uso propio + compartir
+> con su equipo de QA. **NO comercial** por ahora — evitar over-engineering enterprise.
+> Ver memoria [[project-audience-personal-use]] para detalles.
+
+**Fase 7 (próxima — ~3-4 sem)** — compartible con el equipo:
+1. **Auth simple** (user/pass + JWT) — sin orgs, sin RBAC complejo
+2. **API keys in-app** por usuario (Gemini/OpenAI/Anthropic/OpenRouter/Ollama)
+   encriptadas en DB con AES-GCM (SECRET_ENCRYPTION_KEY env)
+3. **Mobile web** — viewport switcher (desktop/tablet/iPhone/Android) en cada scan
+4. **Login pre-flight** — form fill + cookies guardadas para scanear áreas privadas
+5. **Crawler multi-página** — sitemap.xml o depth-N
+
+**Fase 8 (~4-6 sem)** — profundidad y conexiones:
+6. Programación de scans (cron) + notificaciones Slack/email
+7. PDF reports con identidad visual
+8. Cross-browser (Firefox + WebKit)
+9. Visual regression testing (screenshots vs baseline)
+10. Integración Jira (crear bug desde un FAIL)
+11. JUnit XML export
+
+**Fase 9 (evaluar)** — diferenciadores:
+12. AI auto-healing de selectores
+13. AI exploratory testing
+14. OWASP ZAP
+15. Native iOS/Android (solo si el equipo testea apps native — Appium + BrowserStack/Sauce)
 
 ### Pendiente (post-MVP, lower prio)
 
 - ⬜ Optimización Shiki: usar `shiki/core` con imports explícitos para reducir
   los chunks de grammars emitidos por Vite
 - ⬜ Paginación real en `GET /api/scan` (hoy devuelve top 50)
-- ⬜ Auth si el deploy va público
 - ⬜ Migrar de `prisma db push` a `prisma migrate deploy` para versionar schema
+
+### Parqueado (sólo si pivota a producto comercial)
+
+- ⬜ Multi-tenancy / organizaciones / workspaces
+- ⬜ Billing (Stripe) + tiers
+- ⬜ White-label (logo, dominio custom)
+- ⬜ SSO empresarial (SAML/OIDC)
+- ⬜ Audit logs exhaustivos / SOC2 compliance
 
 ### Notas / decisiones
 

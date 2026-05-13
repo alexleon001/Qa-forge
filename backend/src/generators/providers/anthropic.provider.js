@@ -10,7 +10,8 @@ const PROVIDER_ID = 'anthropic';
 const DEFAULT_MODEL = CLAUDE_MODEL;
 
 let clientRef = null;
-function getClient() {
+function getClient(runtimeApiKey) {
+  if (runtimeApiKey) return new Anthropic({ apiKey: runtimeApiKey });
   if (clientRef) return clientRef;
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -32,8 +33,8 @@ export const anthropicProvider = {
     return Boolean(process.env.ANTHROPIC_API_KEY);
   },
 
-  async generateStructured({ system, user, schema, model }) {
-    const client = getClient();
+  async generateStructured({ system, user, schema, model, apiKey }) {
+    const client = getClient(apiKey);
     const useModel = model || DEFAULT_MODEL;
     try {
       const response = await client.messages.create({

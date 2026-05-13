@@ -34,7 +34,11 @@ scanRouter.post('/', async (req, res, next) => {
     const { url } = parse.data;
 
     const scan = await prisma.scan.create({
-      data: { url, status: SCAN_STATUS.PENDING },
+      data: {
+        url,
+        status: SCAN_STATUS.PENDING,
+        userId: req.user?.id ?? null,
+      },
     });
 
     await enqueueScan(scan.id);
@@ -117,9 +121,15 @@ scanRouter.post('/:id/cancel', async (req, res, next) => {
   }
 });
 
-scanRouter.get('/', async (_req, res, next) => {
+scanRouter.get('/', async (req, res, next) => {
   try {
+    // Si el user está autenticado, solo sus scans. Si no, los que no tienen
+    // owner (modo legacy / pre-auth) — para no romper backcompat de scans viejos.
+    const where = req.user
+      ? { userId: req.user.id }
+      : { userId: null };
     const scans = await prisma.scan.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       take: 50,
       select: {

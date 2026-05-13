@@ -1,14 +1,19 @@
 // Layout raíz + ruteo de QA Forge.
 
-import { Link, Route, Routes } from 'react-router-dom';
+import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 
+import { ApiKeys } from './views/ApiKeys.jsx';
 import { Compare } from './views/Compare.jsx';
 import { Dashboard } from './views/Dashboard.jsx';
 import { History } from './views/History.jsx';
 import { Home } from './views/Home.jsx';
+import { Login } from './views/Login.jsx';
 import { ManualCases } from './views/ManualCases.jsx';
+import { Register } from './views/Register.jsx';
 import { ReportDetail } from './views/ReportDetail.jsx';
+import { RequireAuth } from './components/RequireAuth.jsx';
 import { ScriptGenerator } from './views/ScriptGenerator.jsx';
+import { useAuthStore } from './store/auth.store.js';
 
 export function App() {
   return (
@@ -23,23 +28,78 @@ export function App() {
               automated qa
             </span>
           </Link>
-          <nav className="flex items-center gap-4 text-sm text-slate-400">
-            <Link to="/" className="hover:text-slate-100">Home</Link>
-            <span className="opacity-30">·</span>
-            <Link to="/history" className="hover:text-slate-100">History</Link>
-          </nav>
+          <NavBar />
         </div>
       </header>
 
       <main className="flex-1">
         <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/scan/:scanId" element={<Dashboard />} />
-          <Route path="/scan/:scanId/report" element={<ReportDetail />} />
-          <Route path="/scan/:scanId/scripts" element={<ScriptGenerator />} />
-          <Route path="/scan/:scanId/manual-cases" element={<ManualCases />} />
-          <Route path="/history" element={<History />} />
-          <Route path="/compare" element={<Compare />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route
+            path="/"
+            element={
+              <RequireAuth>
+                <Home />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/scan/:scanId"
+            element={
+              <RequireAuth>
+                <Dashboard />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/scan/:scanId/report"
+            element={
+              <RequireAuth>
+                <ReportDetail />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/scan/:scanId/scripts"
+            element={
+              <RequireAuth>
+                <ScriptGenerator />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/scan/:scanId/manual-cases"
+            element={
+              <RequireAuth>
+                <ManualCases />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <RequireAuth>
+                <History />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/compare"
+            element={
+              <RequireAuth>
+                <Compare />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings/api-keys"
+            element={
+              <RequireAuth>
+                <ApiKeys />
+              </RequireAuth>
+            }
+          />
         </Routes>
       </main>
 
@@ -49,5 +109,48 @@ export function App() {
         </div>
       </footer>
     </div>
+  );
+}
+
+function NavBar() {
+  const navigate = useNavigate();
+  const { user, logout } = useAuthStore();
+
+  if (!user) {
+    return (
+      <nav className="flex items-center gap-4 text-sm text-slate-400">
+        <Link to="/login" className="hover:text-slate-100">Iniciar sesión</Link>
+        <Link
+          to="/register"
+          className="rounded-md bg-emerald-500 px-3 py-1.5 text-xs font-medium text-slate-950 hover:bg-emerald-400"
+        >
+          Registrarse
+        </Link>
+      </nav>
+    );
+  }
+
+  return (
+    <nav className="flex items-center gap-4 text-sm text-slate-400">
+      <Link to="/" className="hover:text-slate-100">Home</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/history" className="hover:text-slate-100">History</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/settings/api-keys" className="hover:text-slate-100">API Keys</Link>
+      <span className="opacity-30">·</span>
+      <span className="text-xs text-slate-500" title={user.email}>
+        {user.name || user.email}
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          logout();
+          navigate('/login');
+        }}
+        className="rounded-md border border-slate-700 px-2.5 py-1 text-xs text-slate-300 hover:border-red-500/40 hover:text-red-300"
+      >
+        Salir
+      </button>
+    </nav>
   );
 }

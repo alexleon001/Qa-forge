@@ -16,11 +16,14 @@ process.on('unhandledRejection', (reason) => {
   console.error('[unhandledRejection]', reason);
 });
 
+import { attachUser } from './api/middlewares/auth.middleware.js';
+import { authRouter } from './api/routes/auth.routes.js';
 import { errorHandler, notFoundHandler } from './api/middlewares/error.middleware.js';
 import { manualCasesRouter } from './api/routes/manualcases.routes.js';
 import { reportRouter } from './api/routes/report.routes.js';
 import { scanRouter } from './api/routes/scan.routes.js';
 import { scriptsRouter } from './api/routes/scripts.routes.js';
+import { userKeysRouter } from './api/routes/userkeys.routes.js';
 import { startScanWorker } from './queue/scan.queue.js';
 import { attachSocketServer } from './sockets/scan.socket.js';
 
@@ -59,6 +62,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'qa-forge-backend', timestamp: new Date().toISOString() });
 });
 
+// Atacha req.user si hay JWT válido. NO bloquea — cada route decide si requireAuth.
+app.use('/api', attachUser);
+
+app.use('/api/auth', authRouter);
+app.use('/api/user/api-keys', userKeysRouter);
 app.use('/api/scan', scanRouter);
 app.use('/api/report', reportRouter);
 app.use('/api/scripts', scriptsRouter);

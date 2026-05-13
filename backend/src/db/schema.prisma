@@ -13,6 +13,35 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String? // nombre opcional para mostrar
+  role         String   @default("user") // user | admin (reservado para futuro)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  apiKeys UserApiKey[]
+  scans   Scan[]
+}
+
+model UserApiKey {
+  id           String   @id @default(cuid())
+  userId       String
+  provider     String // anthropic | gemini | openai | openrouter | ollama
+  label        String? // alias opcional ("Mi key de trabajo")
+  encryptedKey String // AES-GCM(base64) — descifrado en runtime con SECRET_ENCRYPTION_KEY
+  hint         String // primeros 4 + últimos 4 chars de la key original, para identificarla en UI
+  isDefault    Boolean  @default(false) // marcada como key default para ese provider
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, provider])
+}
+
 model Scan {
   id          String    @id @default(cuid())
   url         String
@@ -21,16 +50,19 @@ model Scan {
   errorMessage String?
   notes       String? // notas libres de QA (Markdown), editables desde la UI
   cancelRequestedAt DateTime? // si está seteado, el worker aborta el pipeline
+  userId      String? // dueño del scan (nullable para retro-compatibilidad)
   createdAt   DateTime  @default(now())
   startedAt   DateTime?
   completedAt DateTime?
 
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   results Result[]
   scripts Script[]
 
   @@index([url])
   @@index([status])
   @@index([createdAt])
+  @@index([userId])
 }
 
 model Result {

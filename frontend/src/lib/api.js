@@ -2,6 +2,8 @@
 
 import axios from 'axios';
 
+import { getAuthToken, useAuthStore } from '../store/auth.store.js';
+
 const baseURL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 export const api = axios.create({
@@ -15,6 +17,32 @@ const aiApi = axios.create({
   baseURL,
   timeout: 180_000,
 });
+
+// Interceptor: inyectar JWT en cada request si hay sesión activa.
+function authHeaderInterceptor(config) {
+  const token = getAuthToken();
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}
+api.interceptors.request.use(authHeaderInterceptor);
+aiApi.interceptors.request.use(authHeaderInterceptor);
+
+// Si el server devuelve 401, limpiar la sesión (token expirado o inválido).
+function authErrorInterceptor(error) {
+  if (error?.response?.status === 401) {
+    const code = error?.response?.data?.error;
+    // Solo invalidar si es realmente un token issue, no errores de credenciales en login.
+    if (code === 'UNAUTHENTICATED') {
+      useAuthStore.getState().logout();
+    }
+  }
+  return Promise.reject(error);
+}
+api.interceptors.response.use((r) => r, authErrorInterceptor);
+aiApi.interceptors.response.use((r) => r, authErrorInterceptor);
 
 export async function createScan(url) {
   const { data } = await api.post('/api/scan', { url });
@@ -46,6 +74,49 @@ export async function updateScan(scanId, patch) {
 export async function cancelScan(scanId) {
   const { data } = await api.post(`/api/scan/${scanId}/cancel`);
   return data;
+}
+
+// ─── Auth ──────────────────────────────────────────────────────────────
+
+export async function registerUser({ email, password, name }) {
+  const { data } = await api.post('/api/auth/register', { email, password, name });
+  return data;
+}
+
+export async function loginUser({ email, password }) {
+  const { data } = await api.post('/api/auth/login', { email, password });
+  return data;
+}
+
+export async function getMe() {
+  const { data } = await api.get('/api/auth/me');
+  return data.user;
+}
+
+// ─── API Keys del usuario ──────────────────────────────────────────────
+
+export async function listUserApiKeys() {
+  const { data } = await api.get('/api/user/api-keys');
+  return data.apiKeys;
+}
+
+export async function createUserApiKey({ provider, key, label, isDefault }) {
+  const { data } = await api.post('/api/user/api-keys', {
+    provider,
+    key,
+    label: label ?? null,
+    isDefault: Boolean(isDefault),
+  });
+  return data.apiKey;
+}
+
+export async function deleteUserApiKey(id) {
+  await api.delete(`/api/user/api-keys/${id}`);
+}
+
+export async function setUserApiKeyDefault(id) {
+  const { data } = await api.patch(`/api/user/api-keys/${id}/default`);
+  return data.apiKey;
 }
 
 /**

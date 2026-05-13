@@ -13,7 +13,9 @@ function getApiKey() {
 }
 
 let clientRef = null;
-function getClient() {
+function getClient(runtimeApiKey) {
+  // Si llega una key específica (del user logueado), creamos cliente efímero.
+  if (runtimeApiKey) return new GoogleGenAI({ apiKey: runtimeApiKey });
   if (clientRef) return clientRef;
   const apiKey = getApiKey();
   if (!apiKey) {
@@ -98,8 +100,8 @@ export const geminiProvider = {
     return Boolean(getApiKey());
   },
 
-  async generateStructured({ system, user, schema, model }) {
-    const client = getClient();
+  async generateStructured({ system, user, schema, model, apiKey }) {
+    const client = getClient(apiKey);
     const useModel = model || DEFAULT_MODEL;
     const cleanSchema = sanitizeSchemaForGemini(schema);
 

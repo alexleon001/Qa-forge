@@ -8,8 +8,20 @@ import { ProviderError, parseJsonOutput } from './base.js';
 const PROVIDER_ID = 'openrouter';
 const DEFAULT_MODEL = process.env.AI_MODEL_OPENROUTER || 'meta-llama/llama-3.3-70b-instruct';
 
+function buildClient(apiKey) {
+  return new OpenAI({
+    apiKey,
+    baseURL: 'https://openrouter.ai/api/v1',
+    defaultHeaders: {
+      'HTTP-Referer': process.env.OPENROUTER_REFERER || 'http://localhost:5173',
+      'X-Title': 'QA Forge',
+    },
+  });
+}
+
 let clientRef = null;
-function getClient() {
+function getClient(runtimeApiKey) {
+  if (runtimeApiKey) return buildClient(runtimeApiKey);
   if (clientRef) return clientRef;
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
@@ -18,15 +30,7 @@ function getClient() {
       code: 'PROVIDER_NOT_CONFIGURED',
     });
   }
-  clientRef = new OpenAI({
-    apiKey,
-    baseURL: 'https://openrouter.ai/api/v1',
-    defaultHeaders: {
-      // OpenRouter recomienda estos headers para identificar la app (opcional).
-      'HTTP-Referer': process.env.OPENROUTER_REFERER || 'http://localhost:5173',
-      'X-Title': 'QA Forge',
-    },
-  });
+  clientRef = buildClient(apiKey);
   return clientRef;
 }
 
@@ -39,8 +43,8 @@ export const openrouterProvider = {
     return Boolean(process.env.OPENROUTER_API_KEY);
   },
 
-  async generateStructured({ system, user, schema, model }) {
-    const client = getClient();
+  async generateStructured({ system, user, schema, model, apiKey }) {
+    const client = getClient(apiKey);
     const useModel = model || DEFAULT_MODEL;
 
     // El soporte de response_format varía por modelo en OpenRouter. Pedimos
