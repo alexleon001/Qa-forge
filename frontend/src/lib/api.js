@@ -180,6 +180,37 @@ export async function getManualCases(scanId) {
   return data;
 }
 
+// ─── Scheduled scans (FASE 8.6) ─────────────────────────────────────────
+
+export async function listSchedules() {
+  const { data } = await api.get('/api/schedules');
+  return data.schedules;
+}
+
+export async function createSchedule(payload) {
+  const { data } = await api.post('/api/schedules', payload);
+  return data;
+}
+
+export async function updateSchedule(id, patch) {
+  const { data } = await api.patch(`/api/schedules/${id}`, patch);
+  return data;
+}
+
+export async function deleteSchedule(id) {
+  await api.delete(`/api/schedules/${id}`);
+}
+
+export async function runScheduleNow(id) {
+  const { data } = await api.post(`/api/schedules/${id}/run`);
+  return data;
+}
+
+export async function validateCronExpr(cron, timezone) {
+  const { data } = await api.post('/api/schedules/validate-cron', { cron, timezone });
+  return data;
+}
+
 /**
  * Descarga el reporte en json|html|pdf como archivo en el browser.
  * PDF se rutea por `aiApi` (timeout 180s) porque Playwright tarda en lanzar.

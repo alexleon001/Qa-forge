@@ -489,7 +489,29 @@ ninguna de esas cosas, por eso el split.
     History agrega badge `🕷️ crawl` a scans con mode=crawl.
 
 **Fase 8 (~4-6 sem)** — profundidad y conexiones:
-6. Programación de scans (cron) + notificaciones Slack/email
+6. ✅ **Programación de scans (cron + notificaciones)** — implementado 2026-05-14
+   - Nueva tabla `ScheduledScan` con cron expr (5 campos), timezone IANA,
+     config completa del scan (url, device, engine, mode, maxPages, loginConfig
+     cifrada), y campos de notificación: notifyWebhook, notifyEmail, notifyOn
+     (`always | onFailOnly | onWarningOrFail`). `Scan.scheduledScanId` enlaza
+     scans disparados por un schedule.
+   - `backend/src/schedules/cron.master.js`: tick cada 60s, busca schedules
+     habilitados con `nextRunAt <= now`, crea Scan + enqueueScan + recalcula
+     `nextRunAt` con `cron-parser`. Flag `ENABLE_SCHEDULER=false` para
+     deshabilitar (útil en dev local sin Postgres). Bootstrap inicial llena
+     `nextRunAt` de schedules huérfanos.
+   - `backend/src/notify/notifier.js`: al terminar un scan-from-schedule,
+     evalúa `shouldNotify(notifyOn, summary)` y dispara webhook + email en
+     paralelo (safe-call, no rompe el scan). Webhook usa payload mínimo común
+     `{ text, content }` para Slack/Discord. Email usa nodemailer con SMTP
+     configurable via `SMTP_HOST/PORT/USER/PASS/FROM` envs.
+   - API `/api/schedules` CRUD + `POST /:id/run` (correr ahora) +
+     `POST /validate-cron` (preview del próximo run). Sanitiza
+     `encryptedPassword` en respuestas. Endpoints requieren auth, scoped al user.
+   - UI: nueva vista `/schedules` con tabla + form colapsable (presets de
+     cron, autodetect timezone, preview live del próximo run). Botones
+     correr/pausar/borrar por row. Link en NavBar.
+   - Deps nuevas: `cron-parser@5`, `nodemailer@8`.
 7. ✅ **PDF reports con identidad visual** — implementado 2026-05-14
    - `backend/src/reports/pdf.renderer.js` usa Playwright (Chromium) para
      renderizar el mismo HTML del template inline y exportar `page.pdf()`

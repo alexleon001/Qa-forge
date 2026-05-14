@@ -22,10 +22,12 @@ import { errorHandler, notFoundHandler } from './api/middlewares/error.middlewar
 import { manualCasesRouter } from './api/routes/manualcases.routes.js';
 import { reportRouter } from './api/routes/report.routes.js';
 import { scanRouter } from './api/routes/scan.routes.js';
+import { schedulesRouter } from './api/routes/schedules.routes.js';
 import { scriptsRouter } from './api/routes/scripts.routes.js';
 import { userKeysRouter } from './api/routes/userkeys.routes.js';
 import { visualRouter } from './api/routes/visual.routes.js';
 import { startScanWorker } from './queue/scan.queue.js';
+import { startCronMaster } from './schedules/cron.master.js';
 import { attachSocketServer } from './sockets/scan.socket.js';
 
 const PORT = Number(process.env.PORT) || 3001;
@@ -73,6 +75,7 @@ app.use('/api/scan', visualRouter); // /api/scan/:id/screenshot/...
 app.use('/api/report', reportRouter);
 app.use('/api/scripts', scriptsRouter);
 app.use('/api/manual-cases', manualCasesRouter);
+app.use('/api/schedules', schedulesRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -82,6 +85,10 @@ app.use(errorHandler);
 startScanWorker().catch((err) => {
   console.error('[index] No se pudo iniciar el scan worker:', err);
 });
+
+// Cron master para scheduled scans (FASE 8.6). Se puede deshabilitar con
+// ENABLE_SCHEDULER=false (útil en CI o si querés que solo un proceso tickee).
+startCronMaster();
 
 // Bind a 0.0.0.0 (todas las interfaces) — requerido por Railway/Render/Fly
 // para que el healthcheck externo llegue al proceso.

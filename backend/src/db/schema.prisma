@@ -24,6 +24,7 @@ model User {
 
   apiKeys UserApiKey[]
   scans   Scan[]
+  schedules ScheduledScan[]
 }
 
 model UserApiKey {
@@ -42,6 +43,44 @@ model UserApiKey {
   @@index([userId, provider])
 }
 
+// FASE 8.6: scans programados via cron. El cron-master en backend hace tick
+// cada 60s y dispara los que tocan. Notifier opcional via webhook (Slack/Discord)
+// o email SMTP cuando el scan termina.
+model ScheduledScan {
+  id            String   @id @default(cuid())
+  userId        String
+  name          String // alias humano para identificar el schedule
+  cron          String // expresión cron (5 o 6 campos: '0 9 * * *' = 9am diario)
+  timezone      String   @default("UTC")
+  enabled       Boolean  @default(true)
+
+  // Configuración del scan que se va a crear (mismo shape que POST /api/scan)
+  url           String
+  deviceProfile String   @default("desktop")
+  browserEngine String   @default("chromium")
+  mode          String   @default("single")
+  maxPages      Int      @default(1)
+  loginConfig   Json? // mismo formato cifrado que Scan.loginConfig
+
+  // Notificaciones
+  notifyWebhook String? // Slack/Discord webhook URL
+  notifyEmail   String? // destinatario; requiere SMTP_* en .env
+  notifyOn      String   @default("always") // always | onFailOnly | onWarningOrFail
+
+  // Estado
+  lastRunAt     DateTime?
+  nextRunAt     DateTime?
+  lastScanId    String? // último Scan creado por este schedule
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([enabled, nextRunAt])
+}
+
 model Scan {
   id          String    @id @default(cuid())
   url         String
@@ -56,6 +95,7 @@ model Scan {
   mode        String  @default("single") // single | crawl (FASE 7.5)
   maxPages    Int     @default(1) // tope de URLs cuando mode=crawl
   parentScanId String? // si pertenece a un crawl, apunta al scan padre
+  scheduledScanId String? // si fue disparado por un cron schedule, FK al ScheduledScan
   userId      String? // dueño del scan (nullable para retro-compatibilidad)
   createdAt   DateTime  @default(now())
   startedAt   DateTime?
@@ -73,6 +113,7 @@ model Scan {
   @@index([createdAt])
   @@index([userId])
   @@index([parentScanId])
+  @@index([scheduledScanId])
 }
 
 model Result {

@@ -12,6 +12,7 @@ import { ManualCases } from './views/ManualCases.jsx';
 import { Register } from './views/Register.jsx';
 import { ReportDetail } from './views/ReportDetail.jsx';
 import { RequireAuth } from './components/RequireAuth.jsx';
+import { Schedules } from './views/Schedules.jsx';
 import { ScriptGenerator } from './views/ScriptGenerator.jsx';
 import { useAuthStore } from './store/auth.store.js';
 
@@ -100,6 +101,14 @@ export function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/schedules"
+            element={
+              <RequireAuth>
+                <Schedules />
+              </RequireAuth>
+            }
+          />
         </Routes>
       </main>
 
@@ -135,6 +144,8 @@ function NavBar() {
       <Link to="/" className="hover:text-slate-100">Home</Link>
       <span className="opacity-30">·</span>
       <Link to="/history" className="hover:text-slate-100">History</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/schedules" className="hover:text-slate-100">Schedules</Link>
       <span className="opacity-30">·</span>
       <Link to="/settings/api-keys" className="hover:text-slate-100">API Keys</Link>
       <span className="opacity-30">·</span>

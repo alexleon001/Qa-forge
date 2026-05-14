@@ -32,6 +32,7 @@ import { runPageSpeedCheck } from '../runners/pagespeed.runner.js';
 import { runPlaywrightCapture } from '../runners/playwright.runner.js';
 import { runSslCheck } from '../runners/ssl.runner.js';
 import { discoverCrawlUrls } from '../crawler/discover.js';
+import { notifyScanComplete } from '../notify/notifier.js';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -505,6 +506,11 @@ async function processScan(scanId) {
         console.error(`[scan.queue] maybeCompleteCrawlParent error:`, err.message),
       );
     }
+
+    // Si fue disparado por un schedule, notificar
+    if (scan.scheduledScanId) {
+      await maybeNotifySchedule(scan, summary, null).catch(() => {});
+    }
   } catch (err) {
     if (err instanceof ScanCancelledError || err?.name === 'AbortError') {
       console.log(`[scan.queue] Scan ${scanId} cancelado por el usuario`);
@@ -526,9 +532,25 @@ async function processScan(scanId) {
     if (scan?.parentScanId) {
       await maybeCompleteCrawlParent(scan.parentScanId).catch(() => {});
     }
+    if (scan?.scheduledScanId) {
+      await maybeNotifySchedule(
+        { ...scan, status: SCAN_STATUS.FAILED, completedAt: new Date() },
+        null,
+        message,
+      ).catch(() => {});
+    }
   } finally {
     ctx.stopPolling();
   }
+}
+
+/** Carga el schedule + dispara notifier. Helper safe-call. */
+async function maybeNotifySchedule(scan, summary, errorMessage) {
+  const schedule = await prisma.scheduledScan.findUnique({
+    where: { id: scan.scheduledScanId },
+  });
+  if (!schedule) return;
+  await notifyScanComplete({ schedule, scan, summary, errorMessage });
 }
 
 /**
