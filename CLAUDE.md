@@ -514,7 +514,22 @@ ninguna de esas cosas, por eso el split.
      `cd backend && bunx playwright install firefox webkit`. En Railway no
      hace falta — la imagen `mcr.microsoft.com/playwright:v1.60.0-jammy`
      trae los 3 instalados.
-9. Visual regression testing (screenshots vs baseline)
+9. ✅ **Visual regression testing** — implementado 2026-05-14
+   - Nueva tabla `Screenshot` (scanId, url, deviceProfile, browserEngine,
+     kind=`baseline|current|diff`, width, height, dataB64) con índice por
+     `(url, deviceProfile, browserEngine, kind)`.
+   - Nueva categoría `TEST_CATEGORY.VISUAL` + stage `ANALYZING_VISUAL`.
+   - `analyzers/visual.analyzer.js`: lee screenshot del `playwright.capture`
+     en memoria, busca último baseline para la tupla URL+device+engine.
+     - Si no hay → guarda current como baseline + devuelve INFO.
+     - Si hay → pixelmatch (threshold 0.1, alpha 0.3) → genera diff PNG
+       con pixels distintos resaltados.
+   - Thresholds: mismatch ≥5% o size mismatch → FAIL; ≥1% → WARNING; sino PASS.
+     Score = clamp(100 − mismatch% − 10·sizeMismatch, 0, 100).
+   - Endpoint `GET /api/scan/:id/screenshot/:kind` sirve PNG binario.
+   - Frontend: panel "Visual regression" en ReportDetail con 3 thumbs
+     (baseline | current | diff) o mensaje "primer scan" si recién se
+     creó baseline. Deps nuevas: `pixelmatch`, `pngjs`.
 10. Integración Jira (crear bug desde un FAIL)
 11. ✅ **JUnit XML export** — implementado 2026-05-14
     - `backend/src/reports/junit.template.js`: emite `<testsuites>` con un

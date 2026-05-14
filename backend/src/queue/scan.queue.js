@@ -24,6 +24,7 @@ import { analyzeForms } from '../analyzers/forms.analyzer.js';
 import { analyzeLinks } from '../analyzers/links.analyzer.js';
 import { analyzeSecurity } from '../analyzers/security.analyzer.js';
 import { analyzeSeo } from '../analyzers/seo.analyzer.js';
+import { analyzeVisualRegression } from '../analyzers/visual.analyzer.js';
 import { runAccessibilityCheck } from '../runners/accessibility.runner.js';
 import { runHeadersCheck } from '../runners/headers.runner.js';
 import { runLoginPreflight } from '../runners/login.runner.js';
@@ -460,6 +461,30 @@ async function processScan(scanId) {
       score: psResult.data?.scores?.performance ?? null,
       details: psResult.error ? { error: psResult.error } : psResult.data,
     });
+
+    // ─── 10) Visual regression (baseline diff) ───────────────────
+    await checkCancellation(ctx);
+    if (captureData?.screenshot) {
+      emitStage(scanId, SCAN_STAGE.ANALYZING_VISUAL, 'Comparando con baseline visual');
+      const visualResult = await timed('visual.regression', () =>
+        safeRun(() =>
+          analyzeVisualRegression({
+            scanId,
+            url: scan.url,
+            deviceProfile: scan.deviceProfile,
+            browserEngine: scan.browserEngine,
+            currentB64: captureData.screenshot,
+          }),
+        ),
+      );
+      await persistResult(scanId, {
+        category: TEST_CATEGORY.VISUAL,
+        testName: 'visual.regression',
+        status: visualResult.status,
+        score: visualResult.data?.score ?? null,
+        details: visualResult.error ? { error: visualResult.error } : visualResult.data,
+      });
+    }
 
     // ─── Cierre ──────────────────────────────────────────────────
     await checkCancellation(ctx);

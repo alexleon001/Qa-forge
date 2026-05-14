@@ -24,6 +24,7 @@ import { reportRouter } from './api/routes/report.routes.js';
 import { scanRouter } from './api/routes/scan.routes.js';
 import { scriptsRouter } from './api/routes/scripts.routes.js';
 import { userKeysRouter } from './api/routes/userkeys.routes.js';
+import { visualRouter } from './api/routes/visual.routes.js';
 import { startScanWorker } from './queue/scan.queue.js';
 import { attachSocketServer } from './sockets/scan.socket.js';
 
@@ -68,6 +69,7 @@ app.use('/api', attachUser);
 app.use('/api/auth', authRouter);
 app.use('/api/user/api-keys', userKeysRouter);
 app.use('/api/scan', scanRouter);
+app.use('/api/scan', visualRouter); // /api/scan/:id/screenshot/...
 app.use('/api/report', reportRouter);
 app.use('/api/scripts', scriptsRouter);
 app.use('/api/manual-cases', manualCasesRouter);

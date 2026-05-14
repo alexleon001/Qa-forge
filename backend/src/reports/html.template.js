@@ -14,6 +14,7 @@ const CATEGORY_LABEL = {
   performance: 'Performance',
   accessibility: 'Accesibilidad',
   seo: 'SEO',
+  visual: 'Visual regression',
 };
 
 export function renderReportHtml(report) {

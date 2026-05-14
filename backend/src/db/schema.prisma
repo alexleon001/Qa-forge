@@ -66,6 +66,7 @@ model Scan {
   children Scan[]  @relation("ScanChildren")
   results Result[]
   scripts Script[]
+  screenshots Screenshot[]
 
   @@index([url])
   @@index([status])
@@ -88,6 +89,27 @@ model Result {
 
   @@index([scanId])
   @@index([category])
+}
+
+// FASE 8.9: screenshots persistidos (baseline, current, diff) para visual
+// regression. Una tupla (url, deviceProfile, browserEngine, kind=baseline)
+// se considera la referencia para futuros scans de la misma combinación.
+model Screenshot {
+  id            String   @id @default(cuid())
+  scanId        String
+  url           String // URL exacta scaneada (para crawls, la URL del child)
+  deviceProfile String
+  browserEngine String
+  kind          String // baseline | current | diff
+  width         Int
+  height        Int
+  dataB64       String // PNG base64 — no usamos bytes para que el SDK de Prisma + JSON sea fácil
+  createdAt     DateTime @default(now())
+
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([url, deviceProfile, browserEngine, kind])
+  @@index([scanId])
 }
 
 model Script {

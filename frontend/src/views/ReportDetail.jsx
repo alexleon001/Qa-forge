@@ -17,9 +17,10 @@ const CATEGORY_LABEL = {
   performance: 'Performance',
   accessibility: 'Accesibilidad',
   seo: 'SEO',
+  visual: 'Visual regression',
 };
 
-const CATEGORY_ORDER = ['functional', 'security', 'performance', 'accessibility', 'seo'];
+const CATEGORY_ORDER = ['functional', 'security', 'performance', 'accessibility', 'seo', 'visual'];
 
 export function ReportDetail() {
   const { scanId } = useParams();
@@ -158,6 +159,8 @@ export function ReportDetail() {
 
       <NotesEditor scanId={scanId} initialNotes={scanMeta?.notes ?? ''} />
 
+      <VisualRegressionPanel scanId={scanId} byCategory={byCategory} />
+
       {visibleCategories.map((cat) => (
         <CategorySection
           key={cat}
@@ -198,6 +201,81 @@ function SummaryTile({ label, value, tone }) {
       <div className="text-xs uppercase tracking-widest text-slate-500">{label}</div>
       <div className={`mt-1 text-2xl font-semibold ${colors[tone]}`}>{value}</div>
     </div>
+  );
+}
+
+function VisualRegressionPanel({ scanId, byCategory }) {
+  const visual = byCategory?.visual?.find?.((r) => r.testName === 'visual.regression');
+  if (!visual) return null;
+  const d = visual.details ?? {};
+  const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  const src = (kind) => `${apiBase}/api/scan/${scanId}/screenshot/${kind}`;
+  const firstBaseline = Boolean(d.firstBaseline);
+  const mismatch = typeof d.mismatchPercent === 'number' ? d.mismatchPercent : null;
+
+  return (
+    <section className="mt-8 rounded-xl border border-slate-800/70 bg-slate-900/40 p-5">
+      <header className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-400">
+          Visual regression
+        </h2>
+        <div className="flex items-center gap-3 text-xs text-slate-400">
+          <span
+            className={`rounded-full border px-2 py-0.5 uppercase tracking-widest ${
+              visual.status === 'pass'
+                ? 'border-emerald-500/40 text-emerald-300'
+                : visual.status === 'warning'
+                ? 'border-amber-500/40 text-amber-300'
+                : visual.status === 'fail'
+                ? 'border-red-500/40 text-red-300'
+                : 'border-slate-700 text-slate-300'
+            }`}
+          >
+            {visual.status}
+          </span>
+          {mismatch !== null ? <span>{mismatch}% pixeles distintos</span> : null}
+          {typeof visual.score === 'number' ? <span>score: {visual.score}</span> : null}
+        </div>
+      </header>
+      {firstBaseline ? (
+        <p className="rounded border border-slate-700 bg-slate-950/50 p-3 text-xs text-slate-400">
+          🎬 Primer scan para esta URL + device + engine — guardado como{' '}
+          <strong className="text-slate-200">baseline</strong>. Los próximos scans con la
+          misma combinación van a compararse contra esta imagen.
+        </p>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-3">
+          <ShotThumb label="Baseline" src={src('baseline')} />
+          <ShotThumb label="Actual" src={src('current')} />
+          <ShotThumb label="Diff" src={src('diff')} />
+        </div>
+      )}
+      {d.sizeMismatch ? (
+        <p className="mt-3 rounded border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-xs text-amber-300">
+          ⚠ Las dimensiones del screenshot cambiaron (baseline{' '}
+          {d.baseline?.width}×{d.baseline?.height} vs actual{' '}
+          {d.current?.width}×{d.current?.height}). El diff se computó sobre la región común.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function ShotThumb({ label, src }) {
+  return (
+    <figure className="overflow-hidden rounded border border-slate-800 bg-slate-950/40">
+      <figcaption className="border-b border-slate-800 px-3 py-1.5 text-[11px] uppercase tracking-widest text-slate-400">
+        {label}
+      </figcaption>
+      <a href={src} target="_blank" rel="noreferrer" className="block">
+        <img
+          src={src}
+          alt={label}
+          className="block max-h-72 w-full object-contain bg-black/30"
+          loading="lazy"
+        />
+      </a>
+    </figure>
   );
 }
 

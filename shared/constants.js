@@ -24,6 +24,7 @@ export const TEST_CATEGORY = Object.freeze({
   PERFORMANCE: 'performance',
   ACCESSIBILITY: 'accessibility',
   SEO: 'seo',
+  VISUAL: 'visual',
 });
 
 /** Frameworks soportados por el Script Generator (FASE 3). */
@@ -53,6 +54,7 @@ export const SCAN_STAGE = Object.freeze({
   CHECKING_LINKS: 'checking_links',
   ANALYZING_ACCESSIBILITY: 'analyzing_accessibility',
   ANALYZING_PERFORMANCE: 'analyzing_performance',
+  ANALYZING_VISUAL: 'analyzing_visual',
   GENERATING_SCRIPTS: 'generating_scripts',
   COMPLETED: 'completed',
 });
