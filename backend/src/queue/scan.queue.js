@@ -9,6 +9,7 @@ import {
   DEFAULTS,
   QUEUE_NAME,
   RESULT_STATUS,
+  SCAN_MODE,
   SCAN_STAGE,
   SCAN_STATUS,
   TEST_CATEGORY,
@@ -25,9 +26,11 @@ import { analyzeSecurity } from '../analyzers/security.analyzer.js';
 import { analyzeSeo } from '../analyzers/seo.analyzer.js';
 import { runAccessibilityCheck } from '../runners/accessibility.runner.js';
 import { runHeadersCheck } from '../runners/headers.runner.js';
+import { runLoginPreflight } from '../runners/login.runner.js';
 import { runPageSpeedCheck } from '../runners/pagespeed.runner.js';
 import { runPlaywrightCapture } from '../runners/playwright.runner.js';
 import { runSslCheck } from '../runners/ssl.runner.js';
+import { discoverCrawlUrls } from '../crawler/discover.js';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -236,12 +239,21 @@ async function checkCancellation(ctx) {
 /**
  * Pipeline de scan. Cada paso es independiente; un fallo se persiste como
  * Result `fail` y el pipeline continúa.
+ *
+ * Si scan.mode === 'crawl' y no tiene parent, este scan funciona como
+ * "coordinator": descubre URLs y encola child scans (uno por página), luego
+ * espera a que terminen y agrega summary. Los childs corren el pipeline normal.
  */
 async function processScan(scanId) {
   const scan = await prisma.scan.findUnique({ where: { id: scanId } });
   if (!scan) {
     console.warn(`[scan.queue] Scan ${scanId} no existe`);
     return;
+  }
+
+  // Modo crawl coordinator: solo el parent dispara este branch
+  if (scan.mode === SCAN_MODE.CRAWL && !scan.parentScanId) {
+    return processCrawlParent(scan);
   }
 
   const ctx = new ScanContext(scanId);
@@ -265,6 +277,40 @@ async function processScan(scanId) {
     emitProgress(scanId, { stage: SCAN_STAGE.QUEUED, message: 'Iniciando scan' });
     ctx.startPolling();
 
+    // ─── 0) Login pre-flight (opcional) ──────────────────────────
+    // Si el scan tiene loginConfig, autenticamos primero y reusamos el
+    // storageState (cookies + localStorage) en los runners que abren browser.
+    let storageState = null;
+    if (scan.loginConfig) {
+      emitStage(scanId, SCAN_STAGE.LOGIN_PREFLIGHT, 'Autenticando con credenciales del usuario');
+      const loginResult = await timed('login.preflight', () =>
+        safeRun(() =>
+          runLoginPreflight({
+            loginConfig: scan.loginConfig,
+            deviceProfile: scan.deviceProfile,
+            scanCtx: ctx,
+            onStage: (stage) => emitProgress(scanId, { stage, message: `Login: ${stage}` }),
+          }),
+        ),
+      );
+      await persistResult(scanId, {
+        category: TEST_CATEGORY.FUNCTIONAL,
+        testName: 'login.preflight',
+        status: loginResult.status,
+        details: loginResult.error
+          ? { error: loginResult.error }
+          : {
+              // No persistimos el storageState (cookies sensibles). Solo metadata.
+              loginUrl: loginResult.data?.loginUrl,
+              finalUrl: loginResult.data?.finalUrl,
+              cookieCount: loginResult.data?.cookieCount,
+            },
+      });
+      if (loginResult.status === RESULT_STATUS.PASS && loginResult.data?.storageState) {
+        storageState = loginResult.data.storageState;
+      }
+    }
+
     // ─── 1) Playwright: captura DOM/screenshot/links/forms/meta ──
     const pwResult = await timed('playwright.capture', () =>
       safeRun(() =>
@@ -272,6 +318,7 @@ async function processScan(scanId) {
           url: scan.url,
           scanCtx: ctx,
           deviceProfile: scan.deviceProfile,
+          storageState,
           onStage: (stage) =>
             emitProgress(scanId, { stage, message: `Playwright: ${stage}` }),
         }),
@@ -379,6 +426,7 @@ async function processScan(scanId) {
           url: scan.url,
           scanCtx: ctx,
           deviceProfile: scan.deviceProfile,
+          storageState,
         }),
       ),
     );
@@ -422,6 +470,13 @@ async function processScan(scanId) {
     console.log(
       `[scan.queue] scan=${scanId} TOTAL=${Date.now() - totalStart}ms stages=${JSON.stringify(stageTimes)}`,
     );
+
+    // Si pertenece a un crawl, avisar al parent para que reevalúe si terminaron todos
+    if (scan.parentScanId) {
+      await maybeCompleteCrawlParent(scan.parentScanId).catch((err) =>
+        console.error(`[scan.queue] maybeCompleteCrawlParent error:`, err.message),
+      );
+    }
   } catch (err) {
     if (err instanceof ScanCancelledError || err?.name === 'AbortError') {
       console.log(`[scan.queue] Scan ${scanId} cancelado por el usuario`);
@@ -440,9 +495,162 @@ async function processScan(scanId) {
       errorMessage: message,
     });
     emitFailed(scanId, message);
+    if (scan?.parentScanId) {
+      await maybeCompleteCrawlParent(scan.parentScanId).catch(() => {});
+    }
   } finally {
     ctx.stopPolling();
   }
+}
+
+/**
+ * Procesa el scan padre de un crawl: descubre URLs y encola un child por cada
+ * página. Marca este scan como `running` con stage `discovering_urls`; cuando
+ * todos los childs terminan, `maybeCompleteCrawlParent` lo cierra.
+ */
+async function processCrawlParent(parentScan) {
+  const scanId = parentScan.id;
+  const ctx = new ScanContext(scanId);
+
+  try {
+    await checkCancellation(ctx);
+    await updateScanStatus(scanId, SCAN_STATUS.RUNNING, {
+      startedAt: new Date(),
+      stage: SCAN_STAGE.DISCOVERING_URLS,
+    });
+    emitProgress(scanId, { stage: SCAN_STAGE.DISCOVERING_URLS, message: 'Descubriendo URLs' });
+    ctx.startPolling();
+
+    const urls = await discoverCrawlUrls({
+      baseUrl: parentScan.url,
+      maxPages: parentScan.maxPages,
+      scanCtx: ctx,
+      loginConfig: parentScan.loginConfig,
+      deviceProfile: parentScan.deviceProfile,
+    });
+
+    if (!urls || urls.length === 0) {
+      throw new Error('Crawler no encontró URLs (sitemap vacío y sin links internos)');
+    }
+
+    console.log(`[scan.queue] crawl parent=${scanId} descubrió ${urls.length} URLs`);
+
+    // Creamos los childs en una sola transacción para no dejar el parent huérfano
+    const children = await prisma.$transaction(
+      urls.map((u) =>
+        prisma.scan.create({
+          data: {
+            url: u,
+            status: SCAN_STATUS.PENDING,
+            mode: SCAN_MODE.SINGLE,
+            parentScanId: scanId,
+            userId: parentScan.userId,
+            deviceProfile: parentScan.deviceProfile,
+            loginConfig: parentScan.loginConfig,
+          },
+          select: { id: true, url: true },
+        }),
+      ),
+    );
+
+    emitProgress(scanId, {
+      stage: SCAN_STAGE.DISCOVERING_URLS,
+      message: `${children.length} páginas encoladas`,
+      meta: { childCount: children.length, urls: children.map((c) => c.url) },
+    });
+
+    // Encolamos los childs respetando el modo actual (queued/inline)
+    for (const child of children) {
+      await enqueueScan(child.id);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[scan.queue] Crawl parent ${scanId} falló:`, err);
+    await updateScanStatus(scanId, SCAN_STATUS.FAILED, {
+      completedAt: new Date(),
+      errorMessage: message,
+    });
+    emitFailed(scanId, message);
+  } finally {
+    ctx.stopPolling();
+  }
+}
+
+/**
+ * Si todos los childs de un parent crawl están en estado terminal, cierra el
+ * parent y emite el summary agregado. Idempotente: si ya está completado, no-op.
+ */
+async function maybeCompleteCrawlParent(parentScanId) {
+  const parent = await prisma.scan.findUnique({
+    where: { id: parentScanId },
+    select: { id: true, status: true },
+  });
+  if (!parent || parent.status === SCAN_STATUS.COMPLETED || parent.status === SCAN_STATUS.FAILED) {
+    return;
+  }
+  const children = await prisma.scan.findMany({
+    where: { parentScanId },
+    select: { id: true, status: true },
+  });
+  if (children.length === 0) return;
+  const terminal = new Set([
+    SCAN_STATUS.COMPLETED,
+    SCAN_STATUS.FAILED,
+    SCAN_STATUS.CANCELLED,
+  ]);
+  const allDone = children.every((c) => terminal.has(c.status));
+  if (!allDone) return;
+
+  const summary = await buildCrawlSummary(parentScanId);
+  await updateScanStatus(parentScanId, SCAN_STATUS.COMPLETED, {
+    completedAt: new Date(),
+    stage: SCAN_STAGE.COMPLETED,
+  });
+  emitProgress(parentScanId, { stage: SCAN_STAGE.COMPLETED, message: 'Crawl completado' });
+  emitCompleted(parentScanId, summary);
+  console.log(
+    `[scan.queue] crawl parent=${parentScanId} completado (${children.length} childs)`,
+  );
+}
+
+/**
+ * Agrega scores promedio de todos los childs en uno solo, ponderado por
+ * cantidad de Results de cada child.
+ */
+async function buildCrawlSummary(parentScanId) {
+  const children = await prisma.scan.findMany({
+    where: { parentScanId },
+    select: { id: true, status: true, url: true },
+  });
+  const childIds = children.map((c) => c.id);
+  const results = await prisma.result.findMany({
+    where: { scanId: { in: childIds } },
+    select: { category: true, status: true, score: true },
+  });
+  const total = results.length;
+  const passed = results.filter((r) => r.status === RESULT_STATUS.PASS).length;
+  const failed = results.filter((r) => r.status === RESULT_STATUS.FAIL).length;
+  const warnings = results.filter((r) => r.status === RESULT_STATUS.WARNING).length;
+  const byCategory = {};
+  for (const cat of Object.values(TEST_CATEGORY)) {
+    const scored = results.filter((r) => r.category === cat && typeof r.score === 'number');
+    if (scored.length > 0) {
+      byCategory[cat] = Math.round(
+        scored.reduce((sum, r) => sum + r.score, 0) / scored.length,
+      );
+    }
+  }
+  return {
+    total,
+    passed,
+    failed,
+    warnings,
+    byCategory,
+    crawl: {
+      childCount: children.length,
+      children: children.map((c) => ({ id: c.id, url: c.url, status: c.status })),
+    },
+  };
 }
 
 /** Wrapper para runners/analyzers: nunca propaga excepción, devuelve {status,fail,error}. */

@@ -43,6 +43,8 @@ export const SCRIPT_LANGUAGE = Object.freeze({
 /** Etapas de un scan — se emiten al frontend vía Socket.io. */
 export const SCAN_STAGE = Object.freeze({
   QUEUED: 'queued',
+  LOGIN_PREFLIGHT: 'login_preflight',
+  DISCOVERING_URLS: 'discovering_urls',
   LAUNCHING_BROWSER: 'launching_browser',
   CAPTURING_DOM: 'capturing_dom',
   ANALYZING_HEADERS: 'analyzing_headers',
@@ -54,6 +56,15 @@ export const SCAN_STAGE = Object.freeze({
   GENERATING_SCRIPTS: 'generating_scripts',
   COMPLETED: 'completed',
 });
+
+/** Modo de scan. `single` = una sola URL (default). `crawl` = parent que dispara child scans. */
+export const SCAN_MODE = Object.freeze({
+  SINGLE: 'single',
+  CRAWL: 'crawl',
+});
+
+/** Tope absoluto del crawler — máximo de páginas hijas por scan padre. */
+export const MAX_CRAWL_PAGES = 15;
 
 /** Eventos de Socket.io. */
 export const SOCKET_EVENT = Object.freeze({

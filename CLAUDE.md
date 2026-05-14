@@ -202,8 +202,8 @@ ninguna de esas cosas, por eso el split.
 
 ## Estado actual
 
-> **Última fase completada:** FASE 7 pasos 1 (auth + API keys in-app) + 8 (mobile web)
-> **Última sesión:** 2026-05-13 (sesión maratónica: deploy + fixes críticos + FASE 7 parcial)
+> **Última fase completada:** FASE 7 pasos 1 + 2 + 4 + 5 + 8 (FASE 7 cerrada en su roadmap acordado)
+> **Última sesión:** 2026-05-14 (FASE 7.4 login pre-flight + 7.5 crawler multi-página)
 > **Producción**: https://qaforge-chi.vercel.app — con auth funcional + admin creado
 >
 > **Audiencia**: uso personal del owner + equipo chico de QA. **No comercial** (por ahora).
@@ -458,19 +458,35 @@ ninguna de esas cosas, por eso el split.
   - PageSpeed strategy auto-deriva (mobile profiles → mobile, desktop profiles → desktop)
   - Frontend: grid de 6 botones en Home con emoji icons + badge en Dashboard/Report
 
-⬜ **7.4 Login pre-flight** — pendiente (próxima sesión)
-  - Form fill + cookies guardadas para scanear áreas privadas
-  - Schema sugerido: `Scan.loginConfig` JSON con `{ url, usernameSelector, passwordSelector,
-    username, password, submitSelector, postLoginUrl? }`
-  - Antes del playwright.capture, navegar a loginConfig.url, rellenar credenciales,
-    submit, esperar postLoginUrl. Persistir cookies y reusarlas en runners siguientes.
-  - UI: campo expandible "Scan con autenticación" en Home con los selectors
+✅ **7.4 Login pre-flight** — **implementado 2026-05-14**
+  - Schema: `Scan.loginConfig` Json? con `{ url, usernameSelector, passwordSelector,
+    username, encryptedPassword (AES-256-GCM), submitSelector, postLoginUrl?, waitForSelector? }`
+  - `backend/src/runners/login.runner.js` — abre browser, fill form, captura storageState
+    (cookies + localStorage). Heurística de "login fallido": URL sin cambios + 0 cookies.
+  - Pipeline: si `scan.loginConfig`, corre login pre-flight antes de playwright.capture.
+    Pasa storageState a playwright + accessibility runners para que vean la sesión.
+  - Password se cifra en el route handler (reutiliza `auth/crypto.js`). El GET /api/scan
+    sanitiza la respuesta (no devuelve encryptedPassword, solo `hasPassword: true`).
+  - UI: sección "🔐 Scan con autenticación" colapsable en Home con 8 campos.
+    Badge en Dashboard cuando hay login activo.
 
-⬜ **7.5 Crawler multi-página** — pendiente (próxima sesión)
-  - Opción `mode: single | crawl` + `maxPages` (default 1, max 10-20)
-  - Descubrir URLs via sitemap.xml O fallback a links internos del capture
-  - Decisión pendiente: scans hijos en DB (parent-child) o un solo scan con results múltiples
-  - Refactor más grande de la queue — mejor en sesión dedicada
+✅ **7.5 Crawler multi-página** — **implementado 2026-05-14**
+  - Schema: `Scan.mode` (`single|crawl`), `Scan.maxPages` (1-15), `Scan.parentScanId`
+    + relación self `parent`/`children` con `onDelete: Cascade`.
+  - `backend/src/crawler/discover.js` — cascada: (1) sitemap.xml / sitemap_index.xml
+    parsed con regex; (2) fallback a links internos del capture inicial. Dedup +
+    clamp a maxPages. Solo URLs del mismo origin.
+  - Pipeline parent-child:
+    - Parent scan (mode=crawl, sin parentScanId) corre `processCrawlParent`:
+      descubre URLs, crea N child scans en transacción, los encola.
+    - Cada child es un scan single normal (hereda deviceProfile, userId, loginConfig).
+    - Al terminar cada child, `maybeCompleteCrawlParent` chequea si todos están
+      en estado terminal → si sí, calcula summary agregado y cierra el parent.
+  - GET /api/scan/:id incluye `children` (id+url+status). GET /api/scan (history)
+    excluye childs (filter parentScanId: null) para no inundar la lista.
+  - UI: sección "🕷️ Crawler multi-página" en Home con input maxPages. Dashboard
+    muestra `CrawlPanel` con lista de hijas + estado en vivo (poll cada 3s).
+    History agrega badge `🕷️ crawl` a scans con mode=crawl.
 
 **Fase 8 (~4-6 sem)** — profundidad y conexiones:
 6. Programación de scans (cron) + notificaciones Slack/email

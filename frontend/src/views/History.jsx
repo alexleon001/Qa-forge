@@ -125,6 +125,14 @@ export function History() {
                         {new Date(scan.createdAt).toLocaleString()}
                       </span>
                       <code className="text-[11px] text-slate-500">{scan.id}</code>
+                      {scan.mode === 'crawl' ? (
+                        <span
+                          className="rounded border border-emerald-500/40 bg-emerald-500/5 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-emerald-300"
+                          title={`Crawl multi-página · hasta ${scan.maxPages} páginas`}
+                        >
+                          🕷️ crawl
+                        </span>
+                      ) : null}
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs">
                       <Link

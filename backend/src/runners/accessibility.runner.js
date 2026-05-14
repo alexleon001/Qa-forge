@@ -10,7 +10,7 @@ import {
   RESULT_STATUS,
 } from '../../../shared/constants.js';
 
-export async function runAccessibilityCheck({ url, scanCtx, deviceProfile } = {}) {
+export async function runAccessibilityCheck({ url, scanCtx, deviceProfile, storageState } = {}) {
   let browser;
   try {
     const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
@@ -20,7 +20,7 @@ export async function runAccessibilityCheck({ url, scanCtx, deviceProfile } = {}
         await browser?.close();
       } catch {}
     });
-    const context = await browser.newContext(buildContextOptions(deviceProfile));
+    const context = await browser.newContext(buildContextOptions(deviceProfile, storageState));
     const page = await context.newPage();
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
@@ -102,23 +102,23 @@ export async function runAccessibilityCheck({ url, scanCtx, deviceProfile } = {}
   }
 }
 
-function buildContextOptions(deviceProfileId) {
+function buildContextOptions(deviceProfileId, storageState) {
   const id =
     deviceProfileId && DEVICE_PROFILES[deviceProfileId]
       ? deviceProfileId
       : DEFAULT_DEVICE_PROFILE;
   const profile = DEVICE_PROFILES[id];
   const pwDevice = profile.playwrightDevice ? devices[profile.playwrightDevice] : null;
-  if (pwDevice) {
-    return {
-      ...pwDevice,
-      userAgent: pwDevice.userAgent || 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
-    };
-  }
-  return {
-    userAgent: 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
-    viewport: profile.viewport,
-  };
+  const base = pwDevice
+    ? {
+        ...pwDevice,
+        userAgent: pwDevice.userAgent || 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
+      }
+    : {
+        userAgent: 'Mozilla/5.0 (compatible; QAForgeBot/0.1; +a11y-runner)',
+        viewport: profile.viewport,
+      };
+  return storageState ? { ...base, storageState } : base;
 }
 
 function countBy(arr, key) {

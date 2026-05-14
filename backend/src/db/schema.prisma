@@ -51,12 +51,18 @@ model Scan {
   notes       String? // notas libres de QA (Markdown), editables desde la UI
   cancelRequestedAt DateTime? // si está seteado, el worker aborta el pipeline
   deviceProfile String  @default("desktop") // ver shared/constants.js DEVICE_PROFILES
+  loginConfig Json? // FASE 7.4: config opcional de login pre-flight (selectors + creds cifradas)
+  mode        String  @default("single") // single | crawl (FASE 7.5)
+  maxPages    Int     @default(1) // tope de URLs cuando mode=crawl
+  parentScanId String? // si pertenece a un crawl, apunta al scan padre
   userId      String? // dueño del scan (nullable para retro-compatibilidad)
   createdAt   DateTime  @default(now())
   startedAt   DateTime?
   completedAt DateTime?
 
   user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  parent  Scan?    @relation("ScanChildren", fields: [parentScanId], references: [id], onDelete: Cascade)
+  children Scan[]  @relation("ScanChildren")
   results Result[]
   scripts Script[]
 
@@ -64,6 +70,7 @@ model Scan {
   @@index([status])
   @@index([createdAt])
   @@index([userId])
+  @@index([parentScanId])
 }
 
 model Result {

@@ -10,9 +10,9 @@ import {
 } from '../../../shared/constants.js';
 
 /**
- * @param {{ url: string, onStage?: (stage: string) => void, scanCtx?: import('../queue/scan.queue.js').ScanContext, deviceProfile?: string }} opts
+ * @param {{ url: string, onStage?: (stage: string) => void, scanCtx?: import('../queue/scan.queue.js').ScanContext, deviceProfile?: string, storageState?: object }} opts
  */
-export async function runPlaywrightCapture({ url, onStage, scanCtx, deviceProfile } = {}) {
+export async function runPlaywrightCapture({ url, onStage, scanCtx, deviceProfile, storageState } = {}) {
   let browser;
   try {
     onStage?.('launching_browser');
@@ -27,7 +27,7 @@ export async function runPlaywrightCapture({ url, onStage, scanCtx, deviceProfil
         await browser?.close();
       } catch {}
     });
-    const context = await browser.newContext(buildContextOptions(deviceProfile));
+    const context = await browser.newContext(buildContextOptions(deviceProfile, storageState));
     const page = await context.newPage();
 
     // Emitir info del device usado para el frontend.
@@ -144,20 +144,20 @@ function resolveProfile(deviceProfileId) {
 }
 
 /** Construye las options de newContext según el device profile elegido. */
-function buildContextOptions(deviceProfileId) {
+function buildContextOptions(deviceProfileId, storageState) {
   const profile = resolveProfile(deviceProfileId);
   // Si Playwright tiene un device profile registrado, lo usamos completo
   // (incluye userAgent, deviceScaleFactor, isMobile, hasTouch, etc.).
-  if (profile.pwDevice) {
-    return {
-      ...profile.pwDevice,
-      userAgent: profile.pwDevice.userAgent || defaultUserAgent(),
-    };
-  }
-  return {
-    userAgent: defaultUserAgent(),
-    viewport: profile.viewport,
-  };
+  const base = profile.pwDevice
+    ? {
+        ...profile.pwDevice,
+        userAgent: profile.pwDevice.userAgent || defaultUserAgent(),
+      }
+    : {
+        userAgent: defaultUserAgent(),
+        viewport: profile.viewport,
+      };
+  return storageState ? { ...base, storageState } : base;
 }
 
 function defaultUserAgent() {

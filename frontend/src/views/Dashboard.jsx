@@ -43,6 +43,8 @@ export function Dashboard() {
   const [initialNotes, setInitialNotes] = useState('');
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState(null);
+  const [crawlInfo, setCrawlInfo] = useState(null); // { mode, maxPages, children: [{id,url,status}] }
+  const [loginInfo, setLoginInfo] = useState(null); // { url, hasPassword }
 
   // Si el usuario entra directo al link, hidratamos el store desde el backend.
   useEffect(() => {
@@ -53,6 +55,16 @@ export function Dashboard() {
         const data = await getScan(scanId);
         if (cancelled) return;
         setInitialNotes(data.notes ?? '');
+        if (data.mode === 'crawl') {
+          setCrawlInfo({
+            mode: data.mode,
+            maxPages: data.maxPages,
+            children: data.children ?? [],
+          });
+        }
+        if (data.loginConfig) {
+          setLoginInfo({ url: data.loginConfig.url, hasPassword: data.loginConfig.hasPassword });
+        }
         startScan({
           scanId: data.id,
           url: data.url,
@@ -98,6 +110,24 @@ export function Dashboard() {
   };
 
   const canStop = status === 'running' || status === 'pending';
+
+  // Poll para refrescar el progreso de los child scans en modo crawl.
+  // Los childs emiten a sus propios rooms, no al del parent — el parent solo
+  // se entera cuando termina, así que polleamos /api/scan/:id que ya trae children.
+  useEffect(() => {
+    if (!crawlInfo || (status !== 'running' && status !== 'pending')) return undefined;
+    const id = setInterval(async () => {
+      try {
+        const data = await getScan(scanId);
+        setCrawlInfo({
+          mode: data.mode,
+          maxPages: data.maxPages,
+          children: data.children ?? [],
+        });
+      } catch {}
+    }, 3000);
+    return () => clearInterval(id);
+  }, [crawlInfo, scanId, status]);
 
   // Suscripción Socket.io al room del scan.
   useEffect(() => {
@@ -147,6 +177,18 @@ export function Dashboard() {
           </div>
         </div>
       </header>
+
+      {loginInfo ? (
+        <div className="mb-3 inline-flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-3 py-1.5 text-xs text-emerald-300">
+          <span aria-hidden>🔐</span>
+          Login pre-flight activo →{' '}
+          <span className="text-emerald-200/80">{loginInfo.url}</span>
+        </div>
+      ) : null}
+
+      {crawlInfo ? (
+        <CrawlPanel info={crawlInfo} parentStatus={status} />
+      ) : null}
 
       <ScanProgress status={status} stage={stage} message={message} errorMessage={errorMessage} />
 
@@ -242,6 +284,8 @@ function DeviceBadge({ results }) {
 function stageToMessage(stage) {
   const map = {
     queued: 'Encolando scan',
+    login_preflight: 'Autenticando con credenciales del usuario',
+    discovering_urls: 'Descubriendo URLs para crawl',
     launching_browser: 'Lanzando browser',
     capturing_dom: 'Capturando DOM',
     analyzing_headers: 'Analizando HTTP headers',
@@ -254,6 +298,72 @@ function stageToMessage(stage) {
     completed: 'Scan completado',
   };
   return map[stage] ?? null;
+}
+
+function CrawlPanel({ info, parentStatus }) {
+  const { children = [], maxPages } = info;
+  const done = children.filter((c) =>
+    ['completed', 'failed', 'cancelled'].includes(c.status),
+  ).length;
+  const total = children.length;
+  return (
+    <div className="mb-3 rounded-lg border border-slate-800/70 bg-slate-900/50 p-4">
+      <div className="flex items-center justify-between">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-200">
+          <span aria-hidden>🕷️</span>
+          Crawl multi-página
+          <span className="text-xs font-normal text-slate-500">
+            tope {maxPages} páginas
+          </span>
+        </h3>
+        <span className="text-xs text-slate-400">
+          {done}/{total || '…'} hijas terminadas
+        </span>
+      </div>
+      {total === 0 ? (
+        <p className="mt-3 text-xs text-slate-500">
+          {parentStatus === 'running'
+            ? 'Descubriendo URLs…'
+            : 'Sin páginas hijas todavía.'}
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-1.5">
+          {children.map((c) => (
+            <li
+              key={c.id}
+              className="flex items-center justify-between gap-3 rounded border border-slate-800/60 bg-slate-950/40 px-3 py-1.5 text-xs"
+            >
+              <Link
+                to={`/scan/${c.id}`}
+                className="flex-1 truncate text-slate-300 hover:text-emerald-300"
+                title={c.url}
+              >
+                {c.url}
+              </Link>
+              <ChildStatusBadge status={c.status} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ChildStatusBadge({ status }) {
+  const tones = {
+    pending: 'bg-slate-700 text-slate-300',
+    running: 'bg-blue-500/20 text-blue-300',
+    completed: 'bg-emerald-500/15 text-emerald-300',
+    failed: 'bg-red-500/15 text-red-300',
+    cancelled: 'bg-amber-500/15 text-amber-300',
+  };
+  return (
+    <span
+      className={`rounded px-2 py-0.5 text-[10px] uppercase tracking-widest ${tones[status] ?? tones.pending}`}
+    >
+      {status}
+    </span>
+  );
 }
 
 function StatusBadge({ status }) {

@@ -44,11 +44,18 @@ function authErrorInterceptor(error) {
 api.interceptors.response.use((r) => r, authErrorInterceptor);
 aiApi.interceptors.response.use((r) => r, authErrorInterceptor);
 
-export async function createScan(url, { deviceProfile } = {}) {
-  const { data } = await api.post('/api/scan', {
+export async function createScan(
+  url,
+  { deviceProfile, mode, maxPages, loginConfig } = {},
+) {
+  const body = {
     url,
     deviceProfile: deviceProfile ?? null,
-  });
+  };
+  if (mode) body.mode = mode;
+  if (maxPages) body.maxPages = maxPages;
+  if (loginConfig) body.loginConfig = loginConfig;
+  const { data } = await api.post('/api/scan', body);
   return data;
 }
 
