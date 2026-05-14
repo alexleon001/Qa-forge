@@ -288,6 +288,7 @@ async function processScan(scanId) {
           runLoginPreflight({
             loginConfig: scan.loginConfig,
             deviceProfile: scan.deviceProfile,
+            browserEngine: scan.browserEngine,
             scanCtx: ctx,
             onStage: (stage) => emitProgress(scanId, { stage, message: `Login: ${stage}` }),
           }),
@@ -318,6 +319,7 @@ async function processScan(scanId) {
           url: scan.url,
           scanCtx: ctx,
           deviceProfile: scan.deviceProfile,
+          browserEngine: scan.browserEngine,
           storageState,
           onStage: (stage) =>
             emitProgress(scanId, { stage, message: `Playwright: ${stage}` }),
@@ -426,6 +428,7 @@ async function processScan(scanId) {
           url: scan.url,
           scanCtx: ctx,
           deviceProfile: scan.deviceProfile,
+          browserEngine: scan.browserEngine,
           storageState,
         }),
       ),
@@ -527,6 +530,7 @@ async function processCrawlParent(parentScan) {
       scanCtx: ctx,
       loginConfig: parentScan.loginConfig,
       deviceProfile: parentScan.deviceProfile,
+      browserEngine: parentScan.browserEngine,
     });
 
     if (!urls || urls.length === 0) {
@@ -546,6 +550,7 @@ async function processCrawlParent(parentScan) {
             parentScanId: scanId,
             userId: parentScan.userId,
             deviceProfile: parentScan.deviceProfile,
+            browserEngine: parentScan.browserEngine,
             loginConfig: parentScan.loginConfig,
           },
           select: { id: true, url: true },

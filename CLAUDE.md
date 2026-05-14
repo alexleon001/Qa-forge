@@ -498,7 +498,22 @@ ninguna de esas cosas, por eso el split.
    - Endpoint: `GET /api/report/:id/export?format=pdf`
    - Frontend: nuevo botón "Exportar PDF" en `ReportDetail`. La descarga
      pasa por `aiApi` (timeout 180s) porque Playwright tarda en lanzar
-8. Cross-browser (Firefox + WebKit)
+8. ✅ **Cross-browser (Firefox + WebKit)** — implementado 2026-05-14
+   - `shared/constants.js`: `BROWSER_ENGINES` (chromium/firefox/webkit) +
+     `DEFAULT_BROWSER_ENGINE = chromium`. Schema agrega `Scan.browserEngine`
+     (default chromium).
+   - Helper centralizado `backend/src/runners/browser.js` con `launchBrowser()`
+     y `resolveEngine()` — switch entre los 3 módulos de Playwright. Maneja
+     `PLAYWRIGHT_CHANNEL` solo para Chromium (Firefox/WebKit lo rechazan).
+   - Runners (playwright, accessibility, login) y `crawler/discover.js`
+     aceptan `browserEngine` opt-in. Queue propaga `scan.browserEngine` a
+     todos los runners + a los child scans del crawl.
+   - API: Zod schema acepta `browserEngine`. UI: grid de 3 botones en Home;
+     Dashboard muestra badge con icono + nombre del engine usado.
+   - **Setup local**: si querés probar Firefox/WebKit en dev, correr
+     `cd backend && bunx playwright install firefox webkit`. En Railway no
+     hace falta — la imagen `mcr.microsoft.com/playwright:v1.60.0-jammy`
+     trae los 3 instalados.
 9. Visual regression testing (screenshots vs baseline)
 10. Integración Jira (crear bug desde un FAIL)
 11. ✅ **JUnit XML export** — implementado 2026-05-14

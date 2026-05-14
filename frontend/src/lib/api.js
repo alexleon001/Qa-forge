@@ -46,12 +46,13 @@ aiApi.interceptors.response.use((r) => r, authErrorInterceptor);
 
 export async function createScan(
   url,
-  { deviceProfile, mode, maxPages, loginConfig } = {},
+  { deviceProfile, browserEngine, mode, maxPages, loginConfig } = {},
 ) {
   const body = {
     url,
     deviceProfile: deviceProfile ?? null,
   };
+  if (browserEngine) body.browserEngine = browserEngine;
   if (mode) body.mode = mode;
   if (maxPages) body.maxPages = maxPages;
   if (loginConfig) body.loginConfig = loginConfig;

@@ -8,6 +8,8 @@ import { parseDetails, prisma } from '../../db/client.js';
 import { enqueueScan } from '../../queue/scan.queue.js';
 import { encrypt } from '../../auth/crypto.js';
 import {
+  BROWSER_ENGINES,
+  DEFAULT_BROWSER_ENGINE,
   DEFAULT_DEVICE_PROFILE,
   DEVICE_PROFILES,
   MAX_CRAWL_PAGES,
@@ -49,6 +51,10 @@ const createScanSchema = z.object({
     .enum(Object.keys(DEVICE_PROFILES))
     .optional()
     .nullable(),
+  browserEngine: z
+    .enum(Object.keys(BROWSER_ENGINES))
+    .optional()
+    .nullable(),
   mode: z.enum(Object.values(SCAN_MODE)).optional(),
   maxPages: z.number().int().min(1).max(MAX_CRAWL_PAGES).optional(),
   loginConfig: loginConfigSchema.optional().nullable(),
@@ -60,7 +66,7 @@ scanRouter.post('/', async (req, res, next) => {
     if (!parse.success) {
       throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
     }
-    const { url, deviceProfile, mode, maxPages, loginConfig } = parse.data;
+    const { url, deviceProfile, browserEngine, mode, maxPages, loginConfig } = parse.data;
 
     // Si vino loginConfig, cifrar la password antes de persistirla en JSON
     let storedLoginConfig = null;
@@ -91,6 +97,7 @@ scanRouter.post('/', async (req, res, next) => {
         status: SCAN_STATUS.PENDING,
         userId: req.user?.id ?? null,
         deviceProfile: deviceProfile ?? DEFAULT_DEVICE_PROFILE,
+        browserEngine: browserEngine ?? DEFAULT_BROWSER_ENGINE,
         mode: mode ?? SCAN_MODE.SINGLE,
         maxPages: maxPages ?? 1,
         loginConfig: storedLoginConfig ?? undefined,

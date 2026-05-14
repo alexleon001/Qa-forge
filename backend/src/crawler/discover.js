@@ -27,6 +27,7 @@ export async function discoverCrawlUrls({
   scanCtx,
   loginConfig,
   deviceProfile,
+  browserEngine,
 }) {
   const cap = clampPages(maxPages);
   const origin = new URL(baseUrl).origin;
@@ -44,6 +45,7 @@ export async function discoverCrawlUrls({
     const loginResult = await runLoginPreflight({
       loginConfig,
       deviceProfile,
+      browserEngine,
       scanCtx,
     });
     if (loginResult.status === 'pass' && loginResult.data?.storageState) {
@@ -54,6 +56,7 @@ export async function discoverCrawlUrls({
     url: baseUrl,
     scanCtx,
     deviceProfile,
+    browserEngine,
     storageState,
   });
   if (capture.status !== 'pass' || !capture.data?.links) {

@@ -2,8 +2,9 @@
 // devuelve el storageState (cookies + localStorage) listo para reusar en los
 // runners posteriores. Permite scanear áreas privadas detrás de un login.
 
-import { chromium, devices } from 'playwright';
+import { devices } from 'playwright';
 
+import { launchBrowser, resolveEngine } from './browser.js';
 import { decrypt } from '../auth/crypto.js';
 import {
   DEFAULTS,
@@ -23,7 +24,13 @@ const SUBMIT_WAIT_MS = 15_000;
  * @param {(stage: string) => void} [opts.onStage]
  * @returns {Promise<{ status, data: { storageState, postLoginUrl } | null, error: string | null }>}
  */
-export async function runLoginPreflight({ loginConfig, deviceProfile, scanCtx, onStage } = {}) {
+export async function runLoginPreflight({
+  loginConfig,
+  deviceProfile,
+  scanCtx,
+  onStage,
+  browserEngine,
+} = {}) {
   if (!loginConfig || typeof loginConfig !== 'object') {
     return { status: RESULT_STATUS.INFO, data: null, error: null };
   }
@@ -61,8 +68,7 @@ export async function runLoginPreflight({ loginConfig, deviceProfile, scanCtx, o
   let browser;
   try {
     onStage?.('login_preflight');
-    const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
-    browser = await chromium.launch({ headless: true, channel });
+    browser = await launchBrowser(resolveEngine(browserEngine));
     scanCtx?.registerCleanup(async () => {
       try {
         await browser?.close();

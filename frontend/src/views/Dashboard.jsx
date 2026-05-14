@@ -270,14 +270,28 @@ export function Dashboard() {
 function DeviceBadge({ results }) {
   const capture = results?.find((r) => r.testName === 'playwright.capture');
   const device = capture?.details?.device;
-  if (!device?.label) return null;
+  const engine = capture?.details?.browserEngine;
+  if (!device?.label && !engine) return null;
+  const engineIcons = { chromium: '🟢', firefox: '🦊', webkit: '🧭' };
   return (
-    <span
-      className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300"
-      title={`Viewport: ${device.viewport?.width}×${device.viewport?.height}`}
-    >
-      {device.isMobile ? '📱' : '🖥️'} {device.label}
-    </span>
+    <>
+      {device?.label ? (
+        <span
+          className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300"
+          title={`Viewport: ${device.viewport?.width}×${device.viewport?.height}`}
+        >
+          {device.isMobile ? '📱' : '🖥️'} {device.label}
+        </span>
+      ) : null}
+      {engine ? (
+        <span
+          className="rounded-full border border-slate-700 bg-slate-900 px-2 py-0.5 text-[10px] uppercase tracking-widest text-slate-300"
+          title={`Browser engine: ${engine}`}
+        >
+          {engineIcons[engine] ?? '🌐'} {engine}
+        </span>
+      ) : null}
+    </>
   );
 }
 

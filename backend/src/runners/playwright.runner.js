@@ -1,7 +1,9 @@
 // Runner principal de Playwright: navega la URL y captura DOM, screenshot,
 // links, forms y meta tags. Devuelve { status, data, error }.
 
-import { chromium, devices } from 'playwright';
+import { devices } from 'playwright';
+
+import { launchBrowser, resolveEngine } from './browser.js';
 import {
   DEFAULTS,
   DEVICE_PROFILES,
@@ -10,16 +12,21 @@ import {
 } from '../../../shared/constants.js';
 
 /**
- * @param {{ url: string, onStage?: (stage: string) => void, scanCtx?: import('../queue/scan.queue.js').ScanContext, deviceProfile?: string, storageState?: object }} opts
+ * @param {{ url: string, onStage?: (stage: string) => void, scanCtx?: import('../queue/scan.queue.js').ScanContext, deviceProfile?: string, storageState?: object, browserEngine?: string }} opts
  */
-export async function runPlaywrightCapture({ url, onStage, scanCtx, deviceProfile, storageState } = {}) {
+export async function runPlaywrightCapture({
+  url,
+  onStage,
+  scanCtx,
+  deviceProfile,
+  storageState,
+  browserEngine,
+} = {}) {
   let browser;
   try {
     onStage?.('launching_browser');
-    // En Windows + Bun, el transporte por pipe del chrome-headless-shell falla.
-    // Usar el canal `chrome` o `msedge` evita el binario problemático.
-    const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
-    browser = await chromium.launch({ headless: true, channel });
+    const engine = resolveEngine(browserEngine);
+    browser = await launchBrowser(engine);
     // Permitir cancelación: si llega un cancel, cerramos el browser y page.goto
     // termina con error inmediato en vez de esperar el timeout completo.
     scanCtx?.registerCleanup(async () => {
@@ -113,6 +120,7 @@ export async function runPlaywrightCapture({ url, onStage, scanCtx, deviceProfil
           viewport: profile.viewport,
           isMobile: profile.isMobile,
         },
+        browserEngine: engine,
       },
       error: null,
     };

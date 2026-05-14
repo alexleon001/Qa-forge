@@ -1,8 +1,9 @@
 // Inyecta axe-core en la página vía @axe-core/playwright y reporta violaciones.
 
 import { AxeBuilder } from '@axe-core/playwright';
-import { chromium, devices } from 'playwright';
+import { devices } from 'playwright';
 
+import { launchBrowser, resolveEngine } from './browser.js';
 import {
   DEFAULTS,
   DEVICE_PROFILES,
@@ -10,11 +11,17 @@ import {
   RESULT_STATUS,
 } from '../../../shared/constants.js';
 
-export async function runAccessibilityCheck({ url, scanCtx, deviceProfile, storageState } = {}) {
+export async function runAccessibilityCheck({
+  url,
+  scanCtx,
+  deviceProfile,
+  storageState,
+  browserEngine,
+} = {}) {
   let browser;
   try {
-    const channel = process.env.PLAYWRIGHT_CHANNEL || undefined;
-    browser = await chromium.launch({ headless: true, channel });
+    const engine = resolveEngine(browserEngine);
+    browser = await launchBrowser(engine);
     scanCtx?.registerCleanup(async () => {
       try {
         await browser?.close();

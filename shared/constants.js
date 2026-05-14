@@ -66,6 +66,19 @@ export const SCAN_MODE = Object.freeze({
 /** Tope absoluto del crawler — máximo de páginas hijas por scan padre. */
 export const MAX_CRAWL_PAGES = 15;
 
+/**
+ * Engines de browser soportados. Los 3 están bundled con Playwright (basta con
+ * `bunx playwright install <engine>`). Default `chromium` mantiene el comportamiento
+ * histórico. Pasar al runner via Scan.browserEngine.
+ */
+export const BROWSER_ENGINES = Object.freeze({
+  chromium: { id: 'chromium', label: 'Chromium', icon: '🟢' },
+  firefox: { id: 'firefox', label: 'Firefox', icon: '🦊' },
+  webkit: { id: 'webkit', label: 'WebKit (Safari)', icon: '🧭' },
+});
+
+export const DEFAULT_BROWSER_ENGINE = 'chromium';
+
 /** Eventos de Socket.io. */
 export const SOCKET_EVENT = Object.freeze({
   SCAN_PROGRESS: 'scan:progress',

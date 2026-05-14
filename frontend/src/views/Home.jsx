@@ -16,11 +16,18 @@ const DEVICE_OPTIONS = [
   { id: 'pixel-7', label: 'Pixel 7 (Android)', icon: '🤖' },
 ];
 
+const ENGINE_OPTIONS = [
+  { id: 'chromium', label: 'Chromium', icon: '🟢' },
+  { id: 'firefox', label: 'Firefox', icon: '🦊' },
+  { id: 'webkit', label: 'WebKit (Safari)', icon: '🧭' },
+];
+
 const MAX_CRAWL_PAGES = 15;
 
 export function Home() {
   const [url, setUrl] = useState('https://');
   const [deviceProfile, setDeviceProfile] = useState('desktop');
+  const [browserEngine, setBrowserEngine] = useState('chromium');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -49,7 +56,7 @@ export function Home() {
     setError(null);
     setSubmitting(true);
     try {
-      const payload = { deviceProfile };
+      const payload = { deviceProfile, browserEngine };
       if (crawlEnabled) {
         payload.mode = 'crawl';
         payload.maxPages = Math.min(Math.max(Number(maxPages) || 1, 1), MAX_CRAWL_PAGES);
@@ -138,6 +145,33 @@ export function Home() {
                       : 'border-slate-700 bg-slate-900/40 text-slate-300 hover:border-slate-600'
                   }`}
                   data-testid={`device-${opt.id}`}
+                >
+                  <span aria-hidden>{opt.icon}</span>
+                  <span className="truncate">{opt.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs uppercase tracking-widest text-slate-500">
+            Browser engine
+          </p>
+          <div className="grid grid-cols-3 gap-2" data-testid="engine-selector">
+            {ENGINE_OPTIONS.map((opt) => {
+              const active = browserEngine === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setBrowserEngine(opt.id)}
+                  className={`flex items-center gap-2 rounded-md border px-3 py-2 text-left text-sm transition ${
+                    active
+                      ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-200'
+                      : 'border-slate-700 bg-slate-900/40 text-slate-300 hover:border-slate-600'
+                  }`}
+                  data-testid={`engine-${opt.id}`}
                 >
                   <span aria-hidden>{opt.icon}</span>
                   <span className="truncate">{opt.label}</span>
