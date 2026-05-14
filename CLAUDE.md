@@ -490,7 +490,14 @@ ninguna de esas cosas, por eso el split.
 
 **Fase 8 (~4-6 sem)** — profundidad y conexiones:
 6. Programación de scans (cron) + notificaciones Slack/email
-7. PDF reports con identidad visual
+7. ✅ **PDF reports con identidad visual** — implementado 2026-05-14
+   - `backend/src/reports/pdf.renderer.js` usa Playwright (Chromium) para
+     renderizar el mismo HTML del template inline y exportar `page.pdf()`
+   - A4 vertical, márgenes 16/14mm, header + footer con paginación,
+     `printBackground: true` para conservar el theme dark
+   - Endpoint: `GET /api/report/:id/export?format=pdf`
+   - Frontend: nuevo botón "Exportar PDF" en `ReportDetail`. La descarga
+     pasa por `aiApi` (timeout 180s) porque Playwright tarda en lanzar
 8. Cross-browser (Firefox + WebKit)
 9. Visual regression testing (screenshots vs baseline)
 10. Integración Jira (crear bug desde un FAIL)

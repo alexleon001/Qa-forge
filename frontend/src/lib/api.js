@@ -180,10 +180,12 @@ export async function getManualCases(scanId) {
 }
 
 /**
- * Descarga el reporte en json|html como archivo en el browser.
+ * Descarga el reporte en json|html|pdf como archivo en el browser.
+ * PDF se rutea por `aiApi` (timeout 180s) porque Playwright tarda en lanzar.
  */
 export async function downloadReport(scanId, format) {
-  const response = await api.get(`/api/report/${scanId}/export`, {
+  const client = format === 'pdf' ? aiApi : api;
+  const response = await client.get(`/api/report/${scanId}/export`, {
     params: { format },
     responseType: 'blob',
   });

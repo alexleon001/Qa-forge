@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { HttpError } from '../middlewares/error.middleware.js';
 import { parseDetails, prisma } from '../../db/client.js';
 import { renderReportHtml } from '../../reports/html.template.js';
+import { renderReportPdf } from '../../reports/pdf.renderer.js';
 import { RESULT_STATUS, TEST_CATEGORY } from '../../../../shared/constants.js';
 
 export const reportRouter = Router();
@@ -97,7 +98,15 @@ reportRouter.get('/:id/export', async (req, res, next) => {
       return;
     }
 
-    throw new HttpError(400, 'INVALID_FORMAT', 'Formato no soportado. Usar json|html.');
+    if (format === 'pdf') {
+      const pdf = await renderReportPdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.send(pdf);
+      return;
+    }
+
+    throw new HttpError(400, 'INVALID_FORMAT', 'Formato no soportado. Usar json|html|pdf.');
   } catch (err) {
     next(err);
   }

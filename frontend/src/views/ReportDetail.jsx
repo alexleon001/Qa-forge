@@ -105,6 +105,7 @@ export function ReportDetail() {
         <div className="flex gap-2">
           <ExportButton scanId={scanId} format="json" label="Exportar JSON" />
           <ExportButton scanId={scanId} format="html" label="Exportar HTML" />
+          <ExportButton scanId={scanId} format="pdf" label="Exportar PDF" />
           <Link
             to={`/scan/${scanId}/scripts`}
             className="rounded-md border border-emerald-500/40 px-3 py-2 text-sm text-emerald-300 hover:bg-emerald-500/10"
