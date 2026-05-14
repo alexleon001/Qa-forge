@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { HttpError } from '../middlewares/error.middleware.js';
 import { parseDetails, prisma } from '../../db/client.js';
 import { renderReportHtml } from '../../reports/html.template.js';
+import { renderReportJunit } from '../../reports/junit.template.js';
 import { renderReportPdf } from '../../reports/pdf.renderer.js';
 import { RESULT_STATUS, TEST_CATEGORY } from '../../../../shared/constants.js';
 
@@ -106,7 +107,16 @@ reportRouter.get('/:id/export', async (req, res, next) => {
       return;
     }
 
-    throw new HttpError(400, 'INVALID_FORMAT', 'Formato no soportado. Usar json|html|pdf.');
+    if (format === 'junit' || format === 'xml') {
+      const xml = renderReportJunit(report);
+      const finalName = filename.replace(/\.(junit|xml)$/, '.xml');
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${finalName}"`);
+      res.send(xml);
+      return;
+    }
+
+    throw new HttpError(400, 'INVALID_FORMAT', 'Formato no soportado. Usar json|html|pdf|junit.');
   } catch (err) {
     next(err);
   }

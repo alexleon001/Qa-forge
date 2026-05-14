@@ -501,7 +501,17 @@ ninguna de esas cosas, por eso el split.
 8. Cross-browser (Firefox + WebKit)
 9. Visual regression testing (screenshots vs baseline)
 10. Integración Jira (crear bug desde un FAIL)
-11. JUnit XML export
+11. ✅ **JUnit XML export** — implementado 2026-05-14
+    - `backend/src/reports/junit.template.js`: emite `<testsuites>` con un
+      `<testsuite>` por categoría y un `<testcase>` por Result. Maps:
+      `fail`→`<failure type="failure">`, `warning`→`<failure type="warning">`
+      (configurable via `JUNIT_TREAT_WARNINGS=skipped`), `pass|info`→sin tag.
+    - CDATA con resumen útil para CI: violations de axe (top 5), broken
+      links, headers faltantes, error messages.
+    - Endpoint: `GET /api/report/:id/export?format=junit` (también acepta
+      `xml` como alias). Botón "Exportar JUnit XML" en ReportDetail.
+    - Compatible con: GitHub Actions, GitLab CI, Jenkins (publish JUnit),
+      CircleCI, Bitbucket Pipelines, Azure DevOps.
 
 **Fase 9 (evaluar)** — diferenciadores:
 12. AI auto-healing de selectores
