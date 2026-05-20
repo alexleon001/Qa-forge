@@ -15,6 +15,7 @@ const PROVIDERS = [
   { id: 'anthropic', label: 'Anthropic Claude', help: 'console.anthropic.com' },
   { id: 'gemini', label: 'Google Gemini', help: 'aistudio.google.com/apikey' },
   { id: 'openrouter', label: 'OpenRouter', help: 'openrouter.ai/keys' },
+  { id: 'opencode', label: 'opencode Zen', help: 'opencode.ai/zen → Claves API' },
 ];
 
 export function ApiKeys() {

@@ -10,7 +10,7 @@ import { requireAuth } from '../middlewares/auth.middleware.js';
 
 export const userKeysRouter = Router();
 
-const PROVIDERS = ['anthropic', 'gemini', 'openai', 'openrouter', 'ollama'];
+const PROVIDERS = ['anthropic', 'gemini', 'openai', 'openrouter', 'opencode', 'ollama'];
 
 const createKeySchema = z.object({
   provider: z.enum(PROVIDERS),

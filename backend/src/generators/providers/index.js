@@ -7,6 +7,7 @@ import { decrypt } from '../../auth/crypto.js';
 import { geminiProvider } from './gemini.provider.js';
 import { ollamaProvider } from './ollama.provider.js';
 import { openaiProvider } from './openai.provider.js';
+import { opencodeProvider } from './opencode.provider.js';
 import { openrouterProvider } from './openrouter.provider.js';
 import { prisma } from '../../db/client.js';
 import { ProviderError } from './base.js';
@@ -17,6 +18,7 @@ export const PROVIDERS = Object.freeze({
   anthropic: anthropicProvider,
   openai: openaiProvider,
   openrouter: openrouterProvider,
+  opencode: opencodeProvider,
   ollama: ollamaProvider,
 });
 

@@ -57,6 +57,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENCODE_API_KEY: ${OPENCODE_API_KEY:-}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       PAGESPEED_API_KEY: ${PAGESPEED_API_KEY:-}
       NODE_ENV: production

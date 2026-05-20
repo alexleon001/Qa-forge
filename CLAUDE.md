@@ -335,7 +335,15 @@ ninguna de esas cosas, por eso el split.
 | Anthropic | https://console.anthropic.com → `ANTHROPIC_API_KEY=...` |
 | OpenAI | https://platform.openai.com/api-keys → `OPENAI_API_KEY=...` |
 | OpenRouter | https://openrouter.ai/keys → `OPENROUTER_API_KEY=...` |
+| opencode Zen | https://opencode.ai/zen → Claves API → `OPENCODE_API_KEY=...` |
 | Ollama (local) | `ollama serve` + `ollama pull qwen2.5-coder:7b` |
+
+> **opencode Zen (agregado 2026-05-20)**: 6º provider. Gateway OpenAI-compatible
+> (`https://opencode.ai/zen/v1`) con modelos curados para coding (Claude, GPT-5,
+> Gemini, Qwen, GLM, etc.). `backend/src/generators/providers/opencode.provider.js`
+> calcado del de OpenRouter (SDK de OpenAI + baseURL custom). `response_format`
+> es best-effort: si el modelo lo rechaza (400/422), reintenta sin él. Default
+> `claude-sonnet-4-5`, override con `AI_MODEL_OPENCODE`. Hay modelos `*-free`.
 
 ### FASE 6 — Implementado
 
