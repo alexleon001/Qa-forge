@@ -1147,6 +1147,8 @@ function RunnerNotes({ initial, onSave }) {
     }, NOTES_DEBOUNCE_MS);
   };
 
+  const hasContent = value.trim().length > 0;
+
   if (!open) {
     return (
       <button
@@ -1154,18 +1156,28 @@ function RunnerNotes({ initial, onSave }) {
         onClick={() => setOpen(true)}
         className="mt-2 text-xs text-slate-500 hover:text-emerald-300"
       >
-        + Nota de ejecución
+        {hasContent ? '📝 Ver nota de ejecución' : '+ Nota de ejecución'}
       </button>
     );
   }
   return (
-    <textarea
-      rows={2}
-      value={value}
-      onChange={handleChange}
-      placeholder="Nota de ejecución: qué pasó, evidencia, link al bug…"
-      className="mt-2 w-full resize-y rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-    />
+    <div className="mt-2">
+      <button
+        type="button"
+        onClick={() => setOpen(false)}
+        className="mb-1 flex items-center gap-1 text-xs text-slate-500 hover:text-emerald-300"
+      >
+        <span>▾</span> Nota de ejecución
+        <span className="text-slate-600">· ocultar</span>
+      </button>
+      <textarea
+        rows={2}
+        value={value}
+        onChange={handleChange}
+        placeholder="Nota de ejecución: qué pasó, evidencia, link al bug…"
+        className="w-full resize-y rounded-md border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-slate-200 placeholder-slate-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+      />
+    </div>
   );
 }
 
