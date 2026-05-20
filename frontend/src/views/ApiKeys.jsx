@@ -11,11 +11,11 @@ import {
 } from '../lib/api.js';
 
 const PROVIDERS = [
-  { id: 'openai', label: 'OpenAI', help: 'platform.openai.com/api-keys' },
+  { id: 'openai', label: 'OpenAI (ChatGPT)', help: 'platform.openai.com/api-keys' },
+  { id: 'opencode', label: 'opencode Zen', help: 'opencode.ai/zen → Claves API' },
   { id: 'anthropic', label: 'Anthropic Claude', help: 'console.anthropic.com' },
   { id: 'gemini', label: 'Google Gemini', help: 'aistudio.google.com/apikey' },
   { id: 'openrouter', label: 'OpenRouter', help: 'openrouter.ai/keys' },
-  { id: 'opencode', label: 'opencode Zen', help: 'opencode.ai/zen → Claves API' },
 ];
 
 export function ApiKeys() {

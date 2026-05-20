@@ -75,7 +75,7 @@ function sanitizeSchemaForOpenAI(schema) {
 
 export const openaiProvider = {
   id: PROVIDER_ID,
-  label: 'OpenAI',
+  label: 'OpenAI (ChatGPT)',
   defaultModel: DEFAULT_MODEL,
 
   async isConfigured() {

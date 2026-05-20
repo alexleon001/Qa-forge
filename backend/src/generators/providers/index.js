@@ -12,17 +12,20 @@ import { openrouterProvider } from './openrouter.provider.js';
 import { prisma } from '../../db/client.js';
 import { ProviderError } from './base.js';
 
-/** Orden de listado (también orden de auto-fallback si AI_PROVIDER=auto). */
+/**
+ * Orden de listado en el dropdown del frontend (y orden de auto-fallback si
+ * AI_PROVIDER=auto): ChatGPT primero (default), opencode Zen, Claude, resto.
+ */
 export const PROVIDERS = Object.freeze({
-  gemini: geminiProvider,
-  anthropic: anthropicProvider,
   openai: openaiProvider,
-  openrouter: openrouterProvider,
   opencode: opencodeProvider,
+  anthropic: anthropicProvider,
+  gemini: geminiProvider,
+  openrouter: openrouterProvider,
   ollama: ollamaProvider,
 });
 
-export const DEFAULT_PROVIDER_ID = process.env.AI_PROVIDER || 'gemini';
+export const DEFAULT_PROVIDER_ID = process.env.AI_PROVIDER || 'openai';
 
 export function getProvider(id) {
   const provider = PROVIDERS[id];

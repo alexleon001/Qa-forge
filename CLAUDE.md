@@ -344,6 +344,11 @@ ninguna de esas cosas, por eso el split.
 > calcado del de OpenRouter (SDK de OpenAI + baseURL custom). `response_format`
 > es best-effort: si el modelo lo rechaza (400/422), reintenta sin él. Default
 > `claude-sonnet-4-5`, override con `AI_MODEL_OPENCODE`. Hay modelos `*-free`.
+>
+> **Orden del dropdown de providers** (registry en `providers/index.js`):
+> OpenAI (ChatGPT) → opencode Zen → Anthropic Claude → Gemini → OpenRouter →
+> Ollama. `DEFAULT_PROVIDER_ID` ahora cae a `openai` (antes `gemini`); el
+> default real lo fija `AI_PROVIDER` en el env.
 
 ### FASE 6 — Implementado
 
