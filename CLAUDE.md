@@ -593,7 +593,10 @@ ninguna de esas cosas, por eso el split.
 
 - ⬜ Optimización Shiki: usar `shiki/core` con imports explícitos para reducir
   los chunks de grammars emitidos por Vite
-- ⬜ Paginación real en `GET /api/scan` (hoy devuelve top 50)
+- ✅ Paginación real en `GET /api/scan` — implementado 2026-05-20.
+  Query `?page=&pageSize=` (default 50, máx 100). Respuesta incluye
+  `pagination { page, pageSize, total, totalPages, hasMore }`. `count` + page
+  en una `$transaction`. UI `History` con botón "Cargar más" incremental.
 - ⬜ Migrar de `prisma db push` a `prisma migrate deploy` para versionar schema
 
 ### Parqueado (sólo si pivota a producto comercial)

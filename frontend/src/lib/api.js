@@ -70,9 +70,13 @@ export async function getReport(scanId) {
   return data;
 }
 
-export async function listScans() {
-  const { data } = await api.get('/api/scan');
-  return data.scans;
+/**
+ * Lista scans paginados. Devuelve { scans, pagination } donde pagination es
+ * { page, pageSize, total, totalPages, hasMore }.
+ */
+export async function listScans({ page = 1, pageSize = 50 } = {}) {
+  const { data } = await api.get('/api/scan', { params: { page, pageSize } });
+  return data;
 }
 
 /** Actualiza notas (u otros campos editables) de un scan. */

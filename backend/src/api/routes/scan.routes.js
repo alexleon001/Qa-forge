@@ -200,31 +200,57 @@ scanRouter.post('/:id/cancel', async (req, res, next) => {
   }
 });
 
+const DEFAULT_PAGE_SIZE = 50;
+const MAX_PAGE_SIZE = 100;
+
+const listScansQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(MAX_PAGE_SIZE).optional(),
+});
+
 scanRouter.get('/', async (req, res, next) => {
   try {
+    const parse = listScansQuerySchema.safeParse(req.query ?? {});
+    if (!parse.success) {
+      throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Query inválida');
+    }
+    const page = parse.data.page ?? 1;
+    const pageSize = parse.data.pageSize ?? DEFAULT_PAGE_SIZE;
+
     // Si el user está autenticado, solo sus scans. Si no, los que no tienen
     // owner (modo legacy / pre-auth) — para no romper backcompat de scans viejos.
     // Excluimos child scans (parentScanId != null): se ven dentro del parent.
     const where = req.user
       ? { userId: req.user.id, parentScanId: null }
       : { userId: null, parentScanId: null };
-    const scans = await prisma.scan.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-      select: {
-        id: true,
-        url: true,
-        status: true,
-        stage: true,
-        mode: true,
-        maxPages: true,
-        parentScanId: true,
-        createdAt: true,
-        completedAt: true,
-      },
+
+    // count + page en una sola transacción para que el total sea consistente.
+    const [total, scans] = await prisma.$transaction([
+      prisma.scan.count({ where }),
+      prisma.scan.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          url: true,
+          status: true,
+          stage: true,
+          mode: true,
+          maxPages: true,
+          parentScanId: true,
+          createdAt: true,
+          completedAt: true,
+        },
+      }),
+    ]);
+
+    const totalPages = total === 0 ? 0 : Math.ceil(total / pageSize);
+    res.json({
+      scans,
+      pagination: { page, pageSize, total, totalPages, hasMore: page < totalPages },
     });
-    res.json({ scans });
   } catch (err) {
     next(err);
   }

@@ -1,6 +1,7 @@
-// History — lista todos los scans pasados, agrupa por URL, links a report/scripts/compare.
+// History — lista los scans pasados (paginados), agrupa por URL, links a
+// report/scripts/compare. Carga incremental con botón "Cargar más".
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { listScans } from '../lib/api.js';
@@ -14,29 +15,35 @@ const STATUS_TONE = {
 
 export function History() {
   const [scans, setScans] = useState([]);
+  const [pagination, setPagination] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    listScans()
-      .then((data) => {
-        if (!cancelled) setScans(data);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err?.message ?? 'No se pudieron cargar los scans');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+  // Carga una página. `append` decide si suma a la lista o la reemplaza.
+  const loadPage = useCallback(async (page, append) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
+    setError(null);
+    try {
+      const { scans: rows, pagination: pg } = await listScans({ page });
+      setScans((prev) => (append ? [...prev, ...rows] : rows));
+      setPagination(pg);
+    } catch (err) {
+      setError(err?.message ?? 'No se pudieron cargar los scans');
+    } finally {
+      if (append) setLoadingMore(false);
+      else setLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    loadPage(1, false);
+  }, [loadPage]);
+
   // Agrupar por URL para facilitar la comparación entre scans de la misma URL.
+  // El filtro opera solo sobre los scans ya cargados en memoria.
   const grouped = useMemo(() => {
     const filtered = query.trim()
       ? scans.filter((s) => s.url.toLowerCase().includes(query.trim().toLowerCase()))
@@ -53,6 +60,8 @@ export function History() {
     }));
   }, [scans, query]);
 
+  const hasMore = Boolean(pagination?.hasMore);
+
   return (
     <section className="mx-auto max-w-5xl px-6 py-10">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
@@ -60,7 +69,9 @@ export function History() {
           <p className="text-xs uppercase tracking-widest text-slate-500">historial</p>
           <h1 className="text-2xl font-bold text-slate-50">Scans pasados</h1>
           <p className="mt-1 text-xs text-slate-500">
-            Mostrando los últimos {scans.length} scans
+            {pagination
+              ? `Mostrando ${scans.length} de ${pagination.total} scans`
+              : `Mostrando ${scans.length} scans`}
           </p>
         </div>
         <input
@@ -72,6 +83,13 @@ export function History() {
           data-testid="history-filter"
         />
       </header>
+
+      {query.trim() && hasMore ? (
+        <p className="mb-4 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-xs text-slate-400">
+          El filtro solo busca entre los {scans.length} scans cargados. Usá “Cargar más”
+          para incluir el resto.
+        </p>
+      ) : null}
 
       {loading ? (
         <p className="text-sm text-slate-500">Cargando…</p>
@@ -161,6 +179,22 @@ export function History() {
           ))}
         </ul>
       )}
+
+      {!loading && !error && hasMore ? (
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={() => loadPage(pagination.page + 1, true)}
+            disabled={loadingMore}
+            className="rounded-lg border border-slate-700 bg-slate-900/60 px-5 py-2 text-sm text-slate-200 hover:border-emerald-500/60 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+            data-testid="history-load-more"
+          >
+            {loadingMore
+              ? 'Cargando…'
+              : `Cargar más (${pagination.total - scans.length} restantes)`}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
