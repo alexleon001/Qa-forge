@@ -17,8 +17,11 @@ import {
   getJiraConfig,
   getManualRun,
   getManualRunSnapshots,
+  getSut,
+  importRepoCasesToRunner,
   listJiraIssues,
   listJiraProjects,
+  listSuts,
   resetManualRun,
   saveManualRunItem,
 } from '../lib/api.js';
@@ -53,10 +56,25 @@ const SOURCE_META = {
   generic: { label: 'Genérico', cls: 'border-slate-600 bg-slate-700/40 text-slate-300' },
   ai: { label: 'IA', cls: 'border-violet-500/40 bg-violet-500/15 text-violet-300' },
   custom: { label: 'Custom', cls: 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300' },
+  repo: { label: 'Repo', cls: 'border-sky-500/40 bg-sky-500/15 text-sky-300' },
 };
 
 const NOTES_DEBOUNCE_MS = 800;
-const EMPTY_FORM = { title: '', category: 'functional', priority: 'medium', description: '' };
+const EMPTY_FORM = {
+  title: '',
+  category: 'functional',
+  priority: 'medium',
+  description: '',
+  preconditions: '',
+  steps: [],
+  postconditions: '',
+};
+
+const splitLines = (s) =>
+  String(s ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
 
 export function ManualRunner({ scanId, aiCases }) {
   const [catalog, setCatalog] = useState([]);
@@ -74,6 +92,7 @@ export function ManualRunner({ scanId, aiCases }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editKey, setEditKey] = useState(null); // caseKey si estamos editando
+  const [editSource, setEditSource] = useState(null); // source del caso en edición
   const [creating, setCreating] = useState(false);
 
   // Filtros del runner.
@@ -86,6 +105,11 @@ export function ManualRunner({ scanId, aiCases }) {
   const [closeLabel, setCloseLabel] = useState('');
   const [closeReset, setCloseReset] = useState(true);
   const [closing, setClosing] = useState(false);
+
+  // Importar casos del repositorio (FASE 10).
+  const [showRepoImport, setShowRepoImport] = useState(false);
+  const [showHidden, setShowHidden] = useState(false);
+  const formRef = useRef(null);
 
   // Carga inicial: runner + snapshots + (best-effort) Jira.
   useEffect(() => {
@@ -137,6 +161,11 @@ export function ManualRunner({ scanId, aiCases }) {
     };
   }, [scanId]);
 
+  // Al abrir el formulario (sobre todo al editar), traerlo a la vista.
+  useEffect(() => {
+    if (showForm) formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [showForm, editKey]);
+
   const runMap = useMemo(() => {
     const map = {};
     for (const it of items) map[it.caseKey] = it;
@@ -149,40 +178,81 @@ export function ManualRunner({ scanId, aiCases }) {
     return map;
   }, [jiraIssues]);
 
-  // Lista unificada de casos con shape homogéneo.
-  const allCases = useMemo(() => {
-    const generic = (catalog ?? []).map((c) => ({
-      caseKey: c.key,
-      source: 'generic',
-      category: c.category || 'functional',
-      priority: c.priority || 'medium',
-      title: c.title,
-      description: c.description,
-    }));
-    const ai = (aiCases ?? []).map((c, i) => ({
-      caseKey: c.id || `ai-${i}`,
-      source: 'ai',
-      category: c.category || 'functional',
-      priority: c.priority || 'medium',
-      title: c.title,
-      preconditions: c.preconditions,
-      steps: c.steps,
-      postconditions: c.postconditions,
-      testData: c.testData,
-      caseNotes: c.notes,
-    }));
-    const custom = (items ?? [])
-      .filter((it) => it.source === 'custom')
-      .map((it) => ({
-        caseKey: it.caseKey,
-        source: 'custom',
-        category: it.payload?.category || 'functional',
-        priority: it.payload?.priority || 'medium',
-        title: it.payload?.title || '(sin título)',
-        description: it.payload?.description,
-      }));
-    return [...generic, ...ai, ...custom];
-  }, [catalog, aiCases, items]);
+  // Lista unificada de casos (generic + ai + repo + custom). Para generic/ai el
+  // `payload` del runner actúa como override editable del caso base; para
+  // custom/repo el payload ES la definición. `payload.hidden` oculta el caso.
+  const { allCases, hiddenCases } = useMemo(() => {
+    const merge = (base, ov) => ({
+      category: ov?.category ?? base.category ?? 'functional',
+      priority: ov?.priority ?? base.priority ?? 'medium',
+      title: ov?.title ?? base.title ?? '(sin título)',
+      description: ov && 'description' in ov ? ov.description : base.description,
+      preconditions: ov?.preconditions ?? base.preconditions,
+      steps: ov?.steps ?? base.steps,
+      postconditions: ov?.postconditions ?? base.postconditions,
+      testData: ov?.testData ?? base.testData,
+      caseNotes: base.caseNotes,
+    });
+    const generic = (catalog ?? []).map((c) => {
+      const ov = runMap[c.key]?.payload;
+      return {
+        caseKey: c.key,
+        source: 'generic',
+        _hidden: ov?.hidden === true,
+        ...merge(
+          { category: c.category, priority: c.priority, title: c.title, description: c.description },
+          ov,
+        ),
+      };
+    });
+    const ai = (aiCases ?? []).map((c, i) => {
+      const caseKey = c.id || `ai-${i}`;
+      const ov = runMap[caseKey]?.payload;
+      return {
+        caseKey,
+        source: 'ai',
+        _hidden: ov?.hidden === true,
+        ...merge(
+          {
+            category: c.category,
+            priority: c.priority,
+            title: c.title,
+            preconditions: c.preconditions,
+            steps: c.steps,
+            postconditions: c.postconditions,
+            testData: c.testData,
+            caseNotes: c.notes,
+          },
+          ov,
+        ),
+      };
+    });
+    const fromItems = (source) =>
+      (items ?? [])
+        .filter((it) => it.source === source)
+        .map((it) => {
+          const p = it.payload ?? {};
+          return {
+            caseKey: it.caseKey,
+            source,
+            _hidden: p.hidden === true,
+            code: p.code,
+            category: p.category || 'functional',
+            priority: p.priority || 'medium',
+            title: p.title || '(sin título)',
+            description: p.description,
+            preconditions: p.preconditions,
+            steps: p.steps,
+            postconditions: p.postconditions,
+            testData: p.testData,
+          };
+        });
+    const everything = [...generic, ...ai, ...fromItems('repo'), ...fromItems('custom')];
+    return {
+      allCases: everything.filter((c) => !c._hidden),
+      hiddenCases: everything.filter((c) => c._hidden),
+    };
+  }, [catalog, aiCases, items, runMap]);
 
   const grouped = useMemo(() => {
     const out = {};
@@ -263,20 +333,36 @@ export function ManualRunner({ scanId, aiCases }) {
     }
   }
 
-  async function handleSubmitCustom(e) {
+  function cancelForm() {
+    setShowForm(false);
+    setEditKey(null);
+    setEditSource(null);
+    setForm(EMPTY_FORM);
+  }
+
+  async function handleSubmitCase(e) {
     e.preventDefault();
     if (!form.title.trim()) return;
     setCreating(true);
     setError(null);
     try {
+      // En edición, partir del payload existente para conservar lo que el form
+      // no toca (code del repo, testData, etc.); los campos del form lo pisan.
+      const existing = editKey ? runMap[editKey]?.payload ?? {} : {};
       const payload = {
+        ...existing,
         title: form.title.trim(),
         category: form.category,
         priority: form.priority,
         description: form.description.trim() || null,
+        preconditions: splitLines(form.preconditions),
+        steps: form.steps
+          .map((s) => ({ action: s.action.trim(), expected: s.expected.trim() }))
+          .filter((s) => s.action || s.expected),
+        postconditions: splitLines(form.postconditions),
       };
       const body = editKey
-        ? { caseKey: editKey, source: 'custom', payload }
+        ? { caseKey: editKey, source: editSource ?? 'custom', payload }
         : { source: 'custom', payload };
       const saved = await saveManualRunItem(scanId, body);
       setItems((prev) => {
@@ -286,10 +372,8 @@ export function ManualRunner({ scanId, aiCases }) {
         next[idx] = saved;
         return next;
       });
-      setForm(EMPTY_FORM);
-      setEditKey(null);
-      setShowForm(false);
       setOpenCategories((p) => ({ ...p, [payload.category]: true }));
+      cancelForm();
     } catch (err) {
       setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo guardar el caso');
     } finally {
@@ -299,27 +383,82 @@ export function ManualRunner({ scanId, aiCases }) {
 
   function startEdit(tc) {
     setEditKey(tc.caseKey);
+    setEditSource(tc.source);
     setForm({
-      title: tc.title,
-      category: tc.category,
-      priority: tc.priority,
+      title: tc.title ?? '',
+      category: tc.category ?? 'functional',
+      priority: tc.priority ?? 'medium',
       description: tc.description ?? '',
+      preconditions: (tc.preconditions ?? []).join('\n'),
+      steps: (tc.steps ?? []).map((s) => ({ action: s.action ?? '', expected: s.expected ?? '' })),
+      postconditions: (tc.postconditions ?? []).join('\n'),
     });
     setShowForm(true);
   }
 
   function startCreate() {
+    if (showForm && !editKey) {
+      cancelForm();
+      return;
+    }
     setEditKey(null);
+    setEditSource(null);
     setForm(EMPTY_FORM);
-    setShowForm((v) => !v);
+    setShowForm(true);
   }
 
-  async function handleDeleteCustom(caseKey) {
-    setItems((prev) => prev.filter((i) => i.caseKey !== caseKey));
+  /** Oculta o restaura un caso generic/ai del runner (override payload.hidden). */
+  async function setCaseHidden(tc, hidden) {
+    const payload = { ...(runMap[tc.caseKey]?.payload ?? {}), hidden };
+    setItems((prev) => {
+      const idx = prev.findIndex((i) => i.caseKey === tc.caseKey);
+      if (idx === -1) {
+        return [
+          ...prev,
+          {
+            caseKey: tc.caseKey,
+            source: tc.source,
+            status: 'pending',
+            notes: null,
+            payload,
+            executedAt: null,
+          },
+        ];
+      }
+      const next = [...prev];
+      next[idx] = { ...next[idx], payload };
+      return next;
+    });
     try {
-      await deleteManualRunItem(scanId, caseKey);
+      const saved = await saveManualRunItem(scanId, {
+        caseKey: tc.caseKey,
+        source: tc.source,
+        payload,
+      });
+      setItems((prev) => {
+        const idx = prev.findIndex((i) => i.caseKey === saved.caseKey);
+        if (idx === -1) return [...prev, saved];
+        const next = [...prev];
+        next[idx] = saved;
+        return next;
+      });
     } catch (err) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo borrar el caso');
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo actualizar el caso');
+    }
+  }
+
+  /** Borra (custom/repo) u oculta (generic/ai) un caso del runner. */
+  async function handleDeleteCase(tc) {
+    if (tc.source === 'custom' || tc.source === 'repo') {
+      if (!window.confirm(`¿Quitar "${tc.title}" del runner?`)) return;
+      setItems((prev) => prev.filter((i) => i.caseKey !== tc.caseKey));
+      try {
+        await deleteManualRunItem(scanId, tc.caseKey);
+      } catch (err) {
+        setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo borrar el caso');
+      }
+    } else {
+      await setCaseHidden(tc, true);
     }
   }
 
@@ -466,6 +605,13 @@ export function ManualRunner({ scanId, aiCases }) {
             </button>
             <button
               type="button"
+              onClick={() => setShowRepoImport((v) => !v)}
+              className="rounded-md border border-sky-500/40 px-3 py-1.5 text-xs text-sky-300 hover:bg-sky-500/10"
+            >
+              📚 {showRepoImport ? 'Cerrar' : 'Importar del repo'}
+            </button>
+            <button
+              type="button"
               onClick={() => setShowClose((v) => !v)}
               className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-500/60 hover:text-emerald-300"
             >
@@ -578,21 +724,33 @@ export function ManualRunner({ scanId, aiCases }) {
           ) : null}
         </div>
 
-        {/* Formulario de caso custom (alta / edición) */}
+        {/* Formulario de caso (alta de custom / edición de cualquier caso) */}
         {showForm ? (
           <form
-            onSubmit={handleSubmitCustom}
-            className="mt-4 space-y-3 rounded-lg border border-slate-800 bg-slate-950/50 p-4"
+            ref={formRef}
+            onSubmit={handleSubmitCase}
+            className="mt-4 space-y-3 rounded-lg border border-emerald-500/30 bg-slate-950/50 p-4"
             data-testid="custom-case-form"
           >
-            <p className="text-xs uppercase tracking-widest text-slate-500">
-              {editKey ? 'Editar caso' : 'Nuevo caso manual'}
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-widest text-slate-500">
+                {editKey
+                  ? `Editar caso${editSource ? ` · ${SOURCE_META[editSource]?.label ?? editSource}` : ''}`
+                  : 'Nuevo caso manual'}
+              </p>
+              <button
+                type="button"
+                onClick={cancelForm}
+                className="text-xs text-slate-500 hover:text-slate-300"
+              >
+                Cancelar
+              </button>
+            </div>
             <input
               type="text"
               value={form.title}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder="Título del caso (ej: Verificar descuento aplicado en el carrito)"
+              placeholder="Título del caso"
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
               maxLength={300}
               required
@@ -635,13 +793,54 @@ export function ManualRunner({ scanId, aiCases }) {
               className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
               maxLength={4000}
             />
-            <button
-              type="submit"
-              disabled={creating || !form.title.trim()}
-              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {creating ? 'Guardando…' : editKey ? 'Guardar cambios' : 'Agregar caso'}
-            </button>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-500">
+                Precondiciones (una por línea)
+              </label>
+              <textarea
+                rows={2}
+                value={form.preconditions}
+                onChange={(e) => setForm((f) => ({ ...f, preconditions: e.target.value }))}
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-500">Pasos</label>
+              <div className="mt-1">
+                <StepRowsEditor
+                  steps={form.steps}
+                  onChange={(steps) => setForm((f) => ({ ...f, steps }))}
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-widest text-slate-500">
+                Postcondiciones (una por línea)
+              </label>
+              <textarea
+                rows={2}
+                value={form.postconditions}
+                onChange={(e) => setForm((f) => ({ ...f, postconditions: e.target.value }))}
+                className="mt-1 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+              />
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="submit"
+                disabled={creating || !form.title.trim()}
+                className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {creating ? 'Guardando…' : editKey ? 'Guardar cambios' : 'Agregar caso'}
+              </button>
+              <button
+                type="button"
+                onClick={cancelForm}
+                disabled={creating}
+                className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:text-slate-100"
+              >
+                Cancelar
+              </button>
+            </div>
           </form>
         ) : null}
 
@@ -678,6 +877,16 @@ export function ManualRunner({ scanId, aiCases }) {
               {closing ? 'Archivando…' : 'Archivar corrida'}
             </button>
           </div>
+        ) : null}
+
+        {showRepoImport ? (
+          <RepoImportPanel
+            scanId={scanId}
+            onImported={(freshItems) => {
+              setItems(freshItems);
+              setShowRepoImport(false);
+            }}
+          />
         ) : null}
       </div>
 
@@ -757,8 +966,8 @@ export function ManualRunner({ scanId, aiCases }) {
                         existingIssue={jiraByCase[tc.caseKey]}
                         onStatus={(status) => patchRun(tc.caseKey, tc.source, { status })}
                         onNotes={(notes) => patchRun(tc.caseKey, tc.source, { notes })}
-                        onDelete={tc.source === 'custom' ? () => handleDeleteCustom(tc.caseKey) : null}
-                        onEdit={tc.source === 'custom' ? () => startEdit(tc) : null}
+                        onDelete={() => handleDeleteCase(tc)}
+                        onEdit={() => startEdit(tc)}
                         onJiraCreated={(issue) => setJiraIssues((prev) => [issue, ...prev])}
                         scanId={scanId}
                       />
@@ -770,6 +979,39 @@ export function ManualRunner({ scanId, aiCases }) {
           );
         })}
       </div>
+
+      {hiddenCases.length > 0 ? (
+        <div className="mt-4 rounded-xl border border-slate-800/70 bg-slate-900/40 px-5 py-3">
+          <button
+            type="button"
+            onClick={() => setShowHidden((v) => !v)}
+            className="flex w-full items-center gap-2 text-left text-xs text-slate-500 hover:text-slate-300"
+          >
+            <span>{showHidden ? '▾' : '▸'}</span>
+            🚫 {hiddenCases.length} caso{hiddenCases.length === 1 ? '' : 's'} oculto
+            {hiddenCases.length === 1 ? '' : 's'}
+          </button>
+          {showHidden ? (
+            <ul className="mt-2 space-y-1">
+              {hiddenCases.map((tc) => (
+                <li key={tc.caseKey} className="flex items-center justify-between gap-2 text-xs">
+                  <span className="truncate text-slate-400 line-through">
+                    {tc.code ? `${tc.code} ` : ''}
+                    {tc.title}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCaseHidden(tc, false)}
+                    className="shrink-0 rounded border border-slate-700 px-2 py-0.5 text-slate-400 hover:border-emerald-500/60 hover:text-emerald-300"
+                  >
+                    Restaurar
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       <ManualRunSnapshots snapshots={snapshots} onDelete={handleDeleteSnapshot} />
     </section>
@@ -824,6 +1066,9 @@ function RunnerRow({
             onClick={() => hasDetail && setExpanded((v) => !v)}
             className={`mt-1 text-left text-sm text-slate-100 ${hasDetail ? 'hover:text-emerald-300' : 'cursor-default'}`}
           >
+            {testCase.code ? (
+              <span className="mr-1 font-mono text-xs text-slate-500">{testCase.code}</span>
+            ) : null}
             {testCase.title}
             {hasDetail ? (
               <span className="ml-1 text-xs text-slate-500">{expanded ? '▲' : '▾'}</span>
@@ -866,7 +1111,11 @@ function RunnerRow({
           {onDelete ? (
             <button
               type="button"
-              title="Borrar caso"
+              title={
+                testCase.source === 'generic' || testCase.source === 'ai'
+                  ? 'Ocultar caso'
+                  : 'Quitar caso'
+              }
               onClick={onDelete}
               className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-500 hover:border-red-500/60 hover:text-red-300"
               data-testid={`delete-${testCase.caseKey}`}
@@ -1067,7 +1316,12 @@ function ManualJiraBug({ scanId, testCase, runNotes, jira, existingIssue, onCrea
 
 /** Detalle del caso según su origen. */
 function CaseDetail({ testCase }) {
-  if (testCase.source === 'ai') {
+  // Render estructurado (pasos/condiciones) para casos IA y de repositorio.
+  const structured =
+    testCase.steps?.length ||
+    testCase.preconditions?.length ||
+    testCase.postconditions?.length;
+  if (structured) {
     return (
       <div className="space-y-3 text-sm">
         {testCase.preconditions?.length ? (
@@ -1298,4 +1552,180 @@ function downloadBlob(content, filename, mime) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/** Panel para traer casos del repositorio de casos de prueba (FASE 10) al runner. */
+function RepoImportPanel({ scanId, onImported }) {
+  const [suts, setSuts] = useState([]);
+  const [sutId, setSutId] = useState('');
+  const [cases, setCases] = useState([]);
+  const [selected, setSelected] = useState(() => new Set());
+  const [loading, setLoading] = useState(true);
+  const [loadingCases, setLoadingCases] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    listSuts()
+      .then((data) => setSuts(data ?? []))
+      .catch((err) => setError(err?.response?.data?.message ?? err?.message ?? 'Error'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    if (!sutId) {
+      setCases([]);
+      setSelected(new Set());
+      return;
+    }
+    setLoadingCases(true);
+    getSut(sutId)
+      .then((data) => {
+        setCases(data.testCases ?? []);
+        setSelected(new Set((data.testCases ?? []).map((c) => c.id)));
+      })
+      .catch((err) => setError(err?.response?.data?.message ?? err?.message ?? 'Error'))
+      .finally(() => setLoadingCases(false));
+  }, [sutId]);
+
+  const toggle = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const handleImport = async () => {
+    if (!selected.size) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const data = await importRepoCasesToRunner(scanId, [...selected]);
+      onImported(data.items ?? []);
+    } catch (err) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo importar');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 space-y-3 rounded-lg border border-sky-500/30 bg-slate-950/50 p-4">
+      <p className="text-xs uppercase tracking-widest text-slate-500">
+        Importar casos del repositorio
+      </p>
+      {loading ? (
+        <p className="text-xs text-slate-500">Cargando SUTs…</p>
+      ) : suts.length === 0 ? (
+        <p className="text-xs text-slate-500">
+          No hay software bajo prueba en el repositorio todavía.
+        </p>
+      ) : (
+        <>
+          <select
+            value={sutId}
+            onChange={(e) => setSutId(e.target.value)}
+            className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none sm:w-80"
+          >
+            <option value="">Elegí un software bajo prueba…</option>
+            {suts.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name} ({s.caseCount})
+              </option>
+            ))}
+          </select>
+
+          {loadingCases ? (
+            <p className="text-xs text-slate-500">Cargando casos…</p>
+          ) : sutId && cases.length === 0 ? (
+            <p className="text-xs text-slate-500">Ese SUT no tiene casos.</p>
+          ) : cases.length > 0 ? (
+            <>
+              <ul className="max-h-60 space-y-1 overflow-y-auto rounded-md border border-slate-800 bg-slate-900/40 p-2">
+                {cases.map((c) => (
+                  <li key={c.id}>
+                    <label className="flex cursor-pointer items-start gap-2 text-xs text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(c.id)}
+                        onChange={() => toggle(c.id)}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="font-mono text-slate-500">{c.code}</span> {c.title}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <button
+                type="button"
+                onClick={handleImport}
+                disabled={importing || selected.size === 0}
+                className="rounded-lg bg-sky-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {importing
+                  ? 'Importando…'
+                  : `Importar ${selected.size} caso${selected.size === 1 ? '' : 's'}`}
+              </button>
+            </>
+          ) : null}
+        </>
+      )}
+      {error ? (
+        <p className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs text-red-300">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Editor de pasos (acción/esperado) para el formulario del runner. */
+function StepRowsEditor({ steps, onChange }) {
+  const setStep = (i, key, value) =>
+    onChange(steps.map((s, idx) => (idx === i ? { ...s, [key]: value } : s)));
+  const add = () => onChange([...steps, { action: '', expected: '' }]);
+  const remove = (i) => onChange(steps.filter((_, idx) => idx !== i));
+  const inputCls =
+    'w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 placeholder-slate-600 focus:border-emerald-500 focus:outline-none';
+  return (
+    <div className="space-y-2">
+      {steps.map((s, i) => (
+        <div key={i} className="flex gap-2 rounded-md border border-slate-800 bg-slate-950/60 p-2">
+          <span className="pt-1.5 text-xs font-semibold text-emerald-400">{i + 1}.</span>
+          <div className="flex-1 space-y-1">
+            <input
+              type="text"
+              value={s.action}
+              onChange={(e) => setStep(i, 'action', e.target.value)}
+              placeholder="Acción"
+              className={inputCls}
+            />
+            <input
+              type="text"
+              value={s.expected}
+              onChange={(e) => setStep(i, 'expected', e.target.value)}
+              placeholder="Resultado esperado"
+              className={inputCls}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => remove(i)}
+            className="self-start rounded border border-slate-700 px-1.5 py-0.5 text-xs text-slate-500 hover:border-red-500/60 hover:text-red-300"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={add}
+        className="text-xs text-emerald-400 hover:text-emerald-300"
+      >
+        + Agregar paso
+      </button>
+    </div>
+  );
 }

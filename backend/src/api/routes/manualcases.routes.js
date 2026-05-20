@@ -93,21 +93,37 @@ manualCasesRouter.get('/:scanId', async (req, res, next) => {
 const RUN_STATUS = ['pending', 'pass', 'fail', 'blocked', 'skipped'];
 const RUN_CATEGORY = ['functional', 'security', 'performance', 'accessibility', 'seo'];
 
-/** Definición de un caso custom creado a mano por el usuario. */
-const customPayloadSchema = z.object({
-  title: z.string().trim().min(1, 'El título es obligatorio').max(300),
-  category: z.enum(RUN_CATEGORY),
-  priority: z.enum([...MANUAL_CASE_PRIORITY]),
-  description: z.string().trim().max(4_000).optional().nullable(),
+const runStepSchema = z.object({
+  action: z.string().trim().max(2_000),
+  expected: z.string().trim().max(2_000),
+});
+
+/**
+ * Definición/override de un caso del runner. Para casos `custom` es la
+ * definición completa; para `generic`/`ai`/`repo` es un override editable que
+ * el frontend mergea sobre el caso base (permite corregir errores por scan).
+ * `hidden: true` oculta el caso del runner sin borrar el caso base.
+ */
+const runPayloadSchema = z.object({
+  title: z.string().trim().max(300).optional(),
+  category: z.enum(RUN_CATEGORY).optional(),
+  priority: z.enum([...MANUAL_CASE_PRIORITY]).optional(),
+  description: z.string().trim().max(4_000).nullable().optional(),
+  preconditions: z.array(z.string().max(1_000)).max(50).optional(),
+  steps: z.array(runStepSchema).max(100).optional(),
+  postconditions: z.array(z.string().max(1_000)).max(50).optional(),
+  testData: z.string().max(4_000).nullable().optional(),
+  code: z.string().max(40).optional(),
+  hidden: z.boolean().optional(),
 });
 
 /** Body del upsert de un item del runner. */
 const runUpsertSchema = z.object({
   caseKey: z.string().trim().min(1).max(200).optional().nullable(),
-  source: z.enum(['generic', 'ai', 'custom']),
+  source: z.enum(['generic', 'ai', 'custom', 'repo']),
   status: z.enum(RUN_STATUS).optional(),
   notes: z.string().trim().max(4_000).optional().nullable(),
-  payload: customPayloadSchema.optional().nullable(),
+  payload: runPayloadSchema.optional().nullable(),
 });
 
 /** Verifica que el scan exista; lanza 404 si no. */
@@ -216,19 +232,16 @@ manualCasesRouter.put('/:scanId/run', async (req, res, next) => {
     const { source, status, notes } = parse.data;
     let { caseKey, payload } = parse.data;
 
-    if (source === 'custom') {
-      if (!caseKey) {
-        if (!payload) {
-          throw new HttpError(400, 'INVALID_INPUT', 'Un caso custom nuevo requiere payload con la definición.');
-        }
-        caseKey = `custom:${randomUUID()}`;
+    if (source === 'custom' && !caseKey) {
+      // Caso custom nuevo — necesita al menos un título.
+      if (!payload?.title || !payload.title.trim()) {
+        throw new HttpError(400, 'INVALID_INPUT', 'Un caso custom nuevo requiere un título.');
       }
-    } else {
-      if (!caseKey) {
-        throw new HttpError(400, 'INVALID_INPUT', 'caseKey es obligatorio para casos generic/ai.');
-      }
-      payload = null; // generic/ai no guardan definición — vive en su origen
+      caseKey = `custom:${randomUUID()}`;
+    } else if (!caseKey) {
+      throw new HttpError(400, 'INVALID_INPUT', 'caseKey es obligatorio.');
     }
+    // generic/ai/repo conservan `payload` como override editable del caso base.
 
     // executedAt marca cuándo se pasó a un estado terminal (no-pending).
     const executedAt = status && status !== 'pending' ? new Date() : null;
@@ -410,6 +423,62 @@ manualCasesRouter.delete('/:scanId/run/snapshots/:id', async (req, res, next) =>
       throw new HttpError(404, 'NOT_FOUND', 'Corrida archivada no encontrada.');
     }
     res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+const importRepoSchema = z.object({
+  caseIds: z.array(z.string().trim().min(1)).min(1).max(500),
+});
+
+/**
+ * POST /api/manual-cases/:scanId/run/import-repo
+ * Trae casos del repositorio (FASE 10) al runner como casos `repo`. Body:
+ * { caseIds }. Cada caso queda como un ManualCaseRun con la definición completa
+ * (pasos, precondiciones) en `payload`.
+ */
+manualCasesRouter.post('/:scanId/run/import-repo', async (req, res, next) => {
+  try {
+    const { scanId } = req.params;
+    const parse = importRepoSchema.safeParse(req.body ?? {});
+    if (!parse.success) {
+      throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
+    }
+    await assertScanExists(scanId);
+
+    const cases = await prisma.testCase.findMany({ where: { id: { in: parse.data.caseIds } } });
+    if (cases.length === 0) {
+      throw new HttpError(404, 'NO_CASES', 'No se encontró ningún caso del repositorio.');
+    }
+
+    await prisma.$transaction(
+      cases.map((tc) => {
+        const caseKey = `repo:${tc.id}`;
+        const payload = {
+          code: tc.code,
+          title: tc.title,
+          category: tc.category,
+          priority: tc.priority,
+          description: tc.description,
+          preconditions: tc.preconditions,
+          steps: tc.steps,
+          postconditions: tc.postconditions,
+          testData: tc.testData,
+        };
+        return prisma.manualCaseRun.upsert({
+          where: { scanId_caseKey: { scanId, caseKey } },
+          create: { scanId, source: 'repo', caseKey, status: 'pending', payload },
+          update: { payload },
+        });
+      }),
+    );
+
+    const items = await prisma.manualCaseRun.findMany({
+      where: { scanId },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json({ imported: cases.length, items });
   } catch (err) {
     next(err);
   }

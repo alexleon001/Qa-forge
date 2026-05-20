@@ -238,6 +238,76 @@ export async function deleteManualRunSnapshot(scanId, snapshotId) {
   await api.delete(`/api/manual-cases/${scanId}/run/snapshots/${snapshotId}`);
 }
 
+// ─── Repositorio de casos de prueba (FASE 10) ───────────────────────────
+
+/** Lista los SUTs (software bajo prueba) con cantidad de casos. */
+export async function listSuts() {
+  const { data } = await api.get('/api/repository/suts');
+  return data.suts;
+}
+
+export async function createSut(payload) {
+  const { data } = await api.post('/api/repository/suts', payload);
+  return data.sut;
+}
+
+/** Devuelve { sut, testCases }. */
+export async function getSut(sutId) {
+  const { data } = await api.get(`/api/repository/suts/${sutId}`);
+  return data;
+}
+
+export async function updateSut(sutId, patch) {
+  const { data } = await api.patch(`/api/repository/suts/${sutId}`, patch);
+  return data.sut;
+}
+
+export async function deleteSut(sutId) {
+  await api.delete(`/api/repository/suts/${sutId}`);
+}
+
+export async function createTestCase(sutId, fields) {
+  const { data } = await api.post(`/api/repository/suts/${sutId}/cases`, fields);
+  return data.testCase;
+}
+
+export async function updateTestCase(caseId, patch) {
+  const { data } = await api.patch(`/api/repository/cases/${caseId}`, patch);
+  return data.testCase;
+}
+
+export async function deleteTestCase(caseId) {
+  await api.delete(`/api/repository/cases/${caseId}`);
+}
+
+/** Aplica un lote de acciones (create/update/delete) — usado al confirmar el chatbot. */
+export async function applyTestCaseActions(sutId, actions) {
+  const { data } = await api.post(`/api/repository/suts/${sutId}/cases/apply`, { actions });
+  return data.testCases;
+}
+
+/** Importa al SUT los casos manuales de un scan. */
+export async function importCasesFromScan(sutId, scanId) {
+  const { data } = await api.post(`/api/repository/suts/${sutId}/import-from-scan`, { scanId });
+  return data; // { imported, testCases }
+}
+
+/** Chatbot del repositorio — devuelve { reply, actions, provider }. */
+export async function chatWithRepo(sutId, { messages, provider, model }) {
+  const { data } = await aiApi.post(`/api/repository/suts/${sutId}/chat`, {
+    messages,
+    provider: provider ?? null,
+    model: model ?? null,
+  });
+  return data;
+}
+
+/** Trae casos del repositorio al runner de un scan. Devuelve { imported, items }. */
+export async function importRepoCasesToRunner(scanId, caseIds) {
+  const { data } = await api.post(`/api/manual-cases/${scanId}/run/import-repo`, { caseIds });
+  return data;
+}
+
 // ─── Scheduled scans (FASE 8.6) ─────────────────────────────────────────
 
 export async function listSchedules() {

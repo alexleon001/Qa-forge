@@ -12,9 +12,11 @@ import { Login } from './views/Login.jsx';
 import { ManualCases } from './views/ManualCases.jsx';
 import { Register } from './views/Register.jsx';
 import { ReportDetail } from './views/ReportDetail.jsx';
+import { Repository } from './views/Repository.jsx';
 import { RequireAuth } from './components/RequireAuth.jsx';
 import { Schedules } from './views/Schedules.jsx';
 import { ScriptGenerator } from './views/ScriptGenerator.jsx';
+import { SutDetail } from './views/SutDetail.jsx';
 import { useAuthStore } from './store/auth.store.js';
 
 export function App() {
@@ -118,6 +120,22 @@ export function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/repository"
+            element={
+              <RequireAuth>
+                <Repository />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/repository/:sutId"
+            element={
+              <RequireAuth>
+                <SutDetail />
+              </RequireAuth>
+            }
+          />
         </Routes>
       </main>
 
@@ -153,6 +171,8 @@ function NavBar() {
       <Link to="/" className="hover:text-slate-100">Home</Link>
       <span className="opacity-30">·</span>
       <Link to="/history" className="hover:text-slate-100">History</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/repository" className="hover:text-slate-100">Repositorio</Link>
       <span className="opacity-30">·</span>
       <Link to="/schedules" className="hover:text-slate-100">Schedules</Link>
       <span className="opacity-30">·</span>

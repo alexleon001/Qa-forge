@@ -22,6 +22,7 @@ import { errorHandler, notFoundHandler } from './api/middlewares/error.middlewar
 import { jiraRouter } from './api/routes/jira.routes.js';
 import { manualCasesRouter } from './api/routes/manualcases.routes.js';
 import { reportRouter } from './api/routes/report.routes.js';
+import { repositoryRouter } from './api/routes/repository.routes.js';
 import { scanRouter } from './api/routes/scan.routes.js';
 import { schedulesRouter } from './api/routes/schedules.routes.js';
 import { scriptsRouter } from './api/routes/scripts.routes.js';
@@ -76,6 +77,7 @@ app.use('/api/scan', visualRouter); // /api/scan/:id/screenshot/...
 app.use('/api/report', reportRouter);
 app.use('/api/scripts', scriptsRouter);
 app.use('/api/manual-cases', manualCasesRouter);
+app.use('/api/repository', repositoryRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/integrations/jira', jiraRouter);
 

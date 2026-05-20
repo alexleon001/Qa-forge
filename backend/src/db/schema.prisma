@@ -249,3 +249,55 @@ model ManualRunSnapshot {
 
   @@index([scanId])
 }
+
+// FASE 10: repositorio de casos de prueba manuales. Independiente de los scans
+// (aunque se pueden importar casos desde un scan). Es compartido por todo el
+// equipo: los endpoints requieren auth pero NO filtran por usuario; createdById
+// queda sólo para auditoría.
+model Sut {
+  id          String   @id @default(cuid())
+  name        String // nombre del software bajo prueba
+  description String?
+  baseUrl     String? // URL principal del producto (opcional)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  testCases TestCase[]
+
+  @@index([name])
+}
+
+// Caso de prueba manual del repositorio. Modelo rico para QA manual: pasos
+// estructurados, pre/postcondiciones, tipo, prioridad, estado, tags, etc.
+model TestCase {
+  id               String   @id @default(cuid())
+  sutId            String
+  code             String // referencia humana, p.ej. "TC-001" — única por SUT
+  title            String
+  description      String?
+  module           String? // feature / área dentro del SUT
+  testType         String   @default("functional") // functional|regression|smoke|integration|acceptance|exploratory|negative|usability
+  category         String   @default("functional") // functional|security|performance|accessibility|seo|ux
+  priority         String   @default("medium") // critical|high|medium|low
+  status           String   @default("active") // draft|active|deprecated
+  preconditions    Json // string[]
+  steps            Json // { action, expected }[]
+  postconditions   Json // string[]
+  expectedResult   String? // resultado esperado global del caso
+  testData         String?
+  tags             Json // string[]
+  estimatedMinutes Int? // estimación de duración de ejecución manual
+  automationStatus String   @default("not-automated") // not-automated|candidate|automated
+  requirementRef   String? // link/ID de requerimiento o ticket asociado
+  notes            String?
+  createdById      String?
+  updatedById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  sut Sut @relation(fields: [sutId], references: [id], onDelete: Cascade)
+
+  @@unique([sutId, code])
+  @@index([sutId])
+}
