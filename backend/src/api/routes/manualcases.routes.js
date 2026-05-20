@@ -12,7 +12,7 @@ import {
   generateManualCasesForScan,
   getManualCasesForScan,
 } from '../../generators/manualcases.generator.js';
-import { prisma } from '../../db/client.js';
+import { parseDetails, prisma } from '../../db/client.js';
 import {
   GENERIC_TEST_CASES,
   MANUAL_CASE_PRIORITY,
@@ -119,18 +119,80 @@ async function assertScanExists(scanId) {
 }
 
 /**
+ * Reglas de pre-llenado: mapean un caso genérico a un Result automático del
+ * scan. Permiten sugerir pass/fail sin que el QA re-verifique a mano lo que la
+ * herramienta ya chequeó. `axeRule` mira una violación puntual de axe.
+ */
+const SUGGESTION_RULES = [
+  { key: 'gen-func-01', testName: 'playwright.capture', label: 'la captura del DOM' },
+  { key: 'gen-func-04', testName: 'links.analyzer', label: 'el chequeo de links' },
+  { key: 'gen-sec-01', testName: 'security.ssl', label: 'el chequeo SSL/HTTPS' },
+  { key: 'gen-sec-02', testName: 'security.ssl', label: 'el chequeo del certificado' },
+  { key: 'gen-sec-03', testName: 'security.headers', label: 'el chequeo de headers' },
+  { key: 'gen-perf-01', testName: 'performance.pagespeed', label: 'PageSpeed Insights' },
+  { key: 'gen-seo-01', testName: 'seo.analyzer', label: 'el análisis SEO' },
+  { key: 'gen-seo-02', testName: 'seo.analyzer', label: 'el análisis SEO' },
+  { key: 'gen-a11y-02', testName: 'accessibility.axe', label: 'axe', axeRule: 'image-alt' },
+  { key: 'gen-a11y-03', testName: 'accessibility.axe', label: 'axe', axeRule: 'color-contrast' },
+];
+
+/** Deriva sugerencias de pass/fail para casos genéricos desde los Results. */
+function buildSuggestions(results) {
+  const byName = {};
+  for (const r of results) byName[r.testName] = r;
+  const out = {};
+  for (const rule of SUGGESTION_RULES) {
+    const r = byName[rule.testName];
+    if (!r) continue;
+    const details = parseDetails(r.details) || {};
+    if (details.error) continue; // el test automático falló — no sugerir
+
+    let status;
+    let extra = '';
+    if (rule.axeRule) {
+      const violations = Array.isArray(details.violations) ? details.violations : [];
+      const hit = violations.find((v) => v && v.id === rule.axeRule);
+      status = hit ? 'fail' : 'pass';
+      if (hit) extra = ` (regla "${rule.axeRule}")`;
+    } else if (r.status === 'pass') {
+      status = 'pass';
+    } else if (r.status === 'fail' || r.status === 'warning') {
+      status = 'fail';
+    } else {
+      continue; // info → sin sugerencia
+    }
+
+    const verdict = status === 'pass' ? 'sin problemas' : 'con problemas';
+    out[rule.key] = {
+      status,
+      reason: `El scan automático (${rule.label}) lo reportó ${verdict}${extra}.`,
+    };
+  }
+  return out;
+}
+
+/**
  * GET /api/manual-cases/:scanId/run
- * Estado del runner: catálogo genérico fijo + items trackeados de este scan.
+ * Estado del runner: catálogo genérico fijo, items trackeados de este scan y
+ * sugerencias de pass/fail derivadas de los Results automáticos.
  */
 manualCasesRouter.get('/:scanId/run', async (req, res, next) => {
   try {
     const { scanId } = req.params;
     await assertScanExists(scanId);
-    const items = await prisma.manualCaseRun.findMany({
-      where: { scanId },
-      orderBy: { createdAt: 'asc' },
+    const [items, results] = await Promise.all([
+      prisma.manualCaseRun.findMany({ where: { scanId }, orderBy: { createdAt: 'asc' } }),
+      prisma.result.findMany({
+        where: { scanId },
+        select: { testName: true, status: true, score: true, details: true },
+      }),
+    ]);
+    res.json({
+      scanId,
+      catalog: GENERIC_TEST_CASES,
+      items,
+      suggestions: buildSuggestions(results),
     });
-    res.json({ scanId, catalog: GENERIC_TEST_CASES, items });
   } catch (err) {
     next(err);
   }
@@ -205,6 +267,147 @@ manualCasesRouter.delete('/:scanId/run/:caseKey', async (req, res, next) => {
     const deleted = await prisma.manualCaseRun.deleteMany({ where: { scanId, caseKey } });
     if (deleted.count === 0) {
       throw new HttpError(404, 'NOT_FOUND', 'Ese caso no estaba trackeado en el runner.');
+    }
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+const runBulkSchema = z.object({
+  items: z
+    .array(
+      z.object({
+        caseKey: z.string().trim().min(1).max(200),
+        source: z.enum(['generic', 'ai', 'custom']),
+        status: z.enum(RUN_STATUS),
+      }),
+    )
+    .min(1)
+    .max(500),
+});
+
+/**
+ * PUT /api/manual-cases/:scanId/run/bulk
+ * Upsert masivo de estados (acciones tipo "aplicar sugerencias", "marcar
+ * categoría"). Body: { items: [{ caseKey, source, status }] }.
+ */
+manualCasesRouter.put('/:scanId/run/bulk', async (req, res, next) => {
+  try {
+    const { scanId } = req.params;
+    const parse = runBulkSchema.safeParse(req.body ?? {});
+    if (!parse.success) {
+      throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
+    }
+    await assertScanExists(scanId);
+    const now = new Date();
+    await prisma.$transaction(
+      parse.data.items.map((it) => {
+        const executedAt = it.status !== 'pending' ? now : null;
+        return prisma.manualCaseRun.upsert({
+          where: { scanId_caseKey: { scanId, caseKey: it.caseKey } },
+          create: { scanId, source: it.source, caseKey: it.caseKey, status: it.status, executedAt },
+          update: { status: it.status, executedAt },
+        });
+      }),
+    );
+    const items = await prisma.manualCaseRun.findMany({
+      where: { scanId },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json({ items });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /api/manual-cases/:scanId/run
+ * Resetea el runner: borra todos los items trackeados (vuelven a "pendiente").
+ */
+manualCasesRouter.delete('/:scanId/run', async (req, res, next) => {
+  try {
+    await prisma.manualCaseRun.deleteMany({ where: { scanId: req.params.scanId } });
+    res.status(204).end();
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** Conteos por estado de una corrida. */
+function summarizeRun(items) {
+  const counts = { pending: 0, pass: 0, fail: 0, blocked: 0, skipped: 0 };
+  for (const it of items) counts[it.status] = (counts[it.status] ?? 0) + 1;
+  return { ...counts, total: items.length, executed: items.length - counts.pending };
+}
+
+const snapshotSchema = z.object({
+  label: z.string().trim().min(1, 'Poné un nombre a la corrida').max(120),
+  reset: z.boolean().optional(),
+  items: z
+    .array(
+      z.object({
+        caseKey: z.string().max(200),
+        source: z.string().max(20),
+        title: z.string().max(400),
+        category: z.string().max(40),
+        priority: z.string().max(20).optional(),
+        status: z.enum(RUN_STATUS),
+        notes: z.string().max(4_000).nullable().optional(),
+      }),
+    )
+    .max(1_000),
+});
+
+/**
+ * POST /api/manual-cases/:scanId/run/snapshots
+ * Cierra una corrida: archiva el estado de todos los casos como snapshot. Con
+ * `reset: true` además limpia el runner para empezar otra ronda de regresión.
+ */
+manualCasesRouter.post('/:scanId/run/snapshots', async (req, res, next) => {
+  try {
+    const { scanId } = req.params;
+    const parse = snapshotSchema.safeParse(req.body ?? {});
+    if (!parse.success) {
+      throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
+    }
+    await assertScanExists(scanId);
+    const { label, reset, items } = parse.data;
+
+    const snapshot = await prisma.$transaction(async (tx) => {
+      const snap = await tx.manualRunSnapshot.create({
+        data: { scanId, label, summary: summarizeRun(items), items },
+      });
+      if (reset) await tx.manualCaseRun.deleteMany({ where: { scanId } });
+      return snap;
+    });
+    res.status(201).json({ snapshot });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/manual-cases/:scanId/run/snapshots — corridas archivadas del scan. */
+manualCasesRouter.get('/:scanId/run/snapshots', async (req, res, next) => {
+  try {
+    const snapshots = await prisma.manualRunSnapshot.findMany({
+      where: { scanId: req.params.scanId },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ snapshots });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** DELETE /api/manual-cases/:scanId/run/snapshots/:id — borra una corrida archivada. */
+manualCasesRouter.delete('/:scanId/run/snapshots/:id', async (req, res, next) => {
+  try {
+    const deleted = await prisma.manualRunSnapshot.deleteMany({
+      where: { id: req.params.id, scanId: req.params.scanId },
+    });
+    if (deleted.count === 0) {
+      throw new HttpError(404, 'NOT_FOUND', 'Corrida archivada no encontrada.');
     }
     res.status(204).end();
   } catch (err) {

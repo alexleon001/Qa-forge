@@ -9,7 +9,7 @@ import { parseDetails, prisma } from '../../db/client.js';
 import { HttpError } from '../middlewares/error.middleware.js';
 import { requireAuth } from '../middlewares/auth.middleware.js';
 import { createIssue, listProjects, normalizeBaseUrl, testConnection } from '../../integrations/jira.client.js';
-import { buildBugContent } from '../../integrations/jira.issue.js';
+import { buildBugContent, buildManualCaseBugContent } from '../../integrations/jira.issue.js';
 
 export const jiraRouter = Router();
 
@@ -169,17 +169,39 @@ jiraRouter.get('/issues', async (req, res, next) => {
   }
 });
 
-const issueSchema = z.object({
-  scanId: z.string().min(1),
-  resultId: z.string().min(1),
-  projectKey: z.string().trim().max(40).optional(),
-  issueType: z.string().trim().max(60).optional(),
-  summary: z.string().trim().max(240).optional(),
+// Definición de un caso del runner manual (FASE 9) — alternativa a resultId.
+const manualCaseSchema = z.object({
+  caseKey: z.string().trim().min(1).max(200),
+  source: z.string().trim().max(20),
+  title: z.string().trim().min(1).max(400),
+  category: z.string().trim().max(40),
+  priority: z.string().trim().max(20).optional(),
+  description: z.string().max(8_000).optional().nullable(),
+  notes: z.string().max(8_000).optional().nullable(),
+  steps: z
+    .array(z.object({ action: z.string().max(2_000), expected: z.string().max(2_000) }))
+    .max(60)
+    .optional(),
 });
 
+const issueSchema = z
+  .object({
+    scanId: z.string().min(1),
+    resultId: z.string().min(1).optional(),
+    manualCase: manualCaseSchema.optional(),
+    projectKey: z.string().trim().max(40).optional(),
+    issueType: z.string().trim().max(60).optional(),
+    summary: z.string().trim().max(240).optional(),
+  })
+  .refine((d) => Boolean(d.resultId) || Boolean(d.manualCase), {
+    message: 'Indicá un resultId (test automático) o un manualCase (caso del runner).',
+  });
+
 /**
- * POST /api/integrations/jira/issue → crea un bug en Jira desde un Result.
- * Body: { scanId, resultId, projectKey?, issueType?, summary? }
+ * POST /api/integrations/jira/issue → crea un bug en Jira.
+ * Body: { scanId, projectKey?, issueType?, summary? } + uno de:
+ *   - { resultId }   → bug desde un Result automático del scan
+ *   - { manualCase } → bug desde un caso del runner manual (FASE 9)
  */
 jiraRouter.post('/issue', async (req, res, next) => {
   try {
@@ -187,7 +209,7 @@ jiraRouter.post('/issue', async (req, res, next) => {
     if (!parse.success) {
       throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
     }
-    const { scanId, resultId, projectKey, issueType, summary } = parse.data;
+    const { scanId, resultId, manualCase, projectKey, issueType, summary } = parse.data;
 
     const { config, creds } = await loadCredentials(req.user.id);
 
@@ -200,17 +222,19 @@ jiraRouter.post('/issue', async (req, res, next) => {
       throw new HttpError(403, 'FORBIDDEN', 'El scan pertenece a otro usuario');
     }
 
-    const result = await prisma.result.findUnique({ where: { id: resultId } });
-    if (!result || result.scanId !== scanId) {
-      throw new HttpError(404, 'RESULT_NOT_FOUND', 'Result no encontrado en este scan');
-    }
+    // `resultId` enlaza el bug a su origen. Para casos manuales reusamos el
+    // campo guardando el caseKey — así el dedup y el listado funcionan igual.
+    const linkKey = manualCase ? manualCase.caseKey : resultId;
 
-    // Evitar bugs duplicados para el mismo Result.
     const existing = await prisma.jiraIssueLink.findFirst({
-      where: { resultId, userId: req.user.id },
+      where: { resultId: linkKey, userId: req.user.id },
     });
     if (existing) {
-      throw new HttpError(409, 'ISSUE_ALREADY_EXISTS', `Ya existe un bug para este test: ${existing.issueKey}`);
+      throw new HttpError(
+        409,
+        'ISSUE_ALREADY_EXISTS',
+        `Ya existe un bug para este caso: ${existing.issueKey}`,
+      );
     }
 
     const targetProject = projectKey || config.defaultProjectKey;
@@ -219,11 +243,21 @@ jiraRouter.post('/issue', async (req, res, next) => {
     }
 
     const reportUrl = buildReportUrl(scanId);
-    const content = buildBugContent({
-      scan,
-      result: { ...result, details: parseDetails(result.details) },
-      reportUrl,
-    });
+
+    let content;
+    if (manualCase) {
+      content = buildManualCaseBugContent({ scan, manualCase, reportUrl });
+    } else {
+      const result = await prisma.result.findUnique({ where: { id: resultId } });
+      if (!result || result.scanId !== scanId) {
+        throw new HttpError(404, 'RESULT_NOT_FOUND', 'Result no encontrado en este scan');
+      }
+      content = buildBugContent({
+        scan,
+        result: { ...result, details: parseDetails(result.details) },
+        reportUrl,
+      });
+    }
 
     const created = await createIssue(creds, {
       projectKey: targetProject,
@@ -237,7 +271,7 @@ jiraRouter.post('/issue', async (req, res, next) => {
       data: {
         userId: req.user.id,
         scanId,
-        resultId,
+        resultId: linkKey,
         issueKey: created.key,
         issueUrl: created.url,
         summary: summary || content.summary,

@@ -133,3 +133,73 @@ export function buildBugContent({ scan, result, reportUrl }) {
     labels: ['qa-forge', `qa-${result.category}`],
   };
 }
+
+/**
+ * Construye el contenido de un bug a partir de un caso del runner manual
+ * (FASE 9) que el QA marcó como FAIL/BLOCKED. Devuelve { summary, descriptionAdf, labels }.
+ *
+ * @param {object} params
+ * @param {{ id: string, url: string }} params.scan
+ * @param {{ caseKey, source, title, category, priority?, description?, notes?, steps? }} params.manualCase
+ * @param {string|null} [params.reportUrl]
+ */
+export function buildManualCaseBugContent({ scan, manualCase, reportUrl }) {
+  const host = safeHost(scan.url);
+  const summary = truncate(`[QA Forge] Caso manual FAIL — ${manualCase.title} (${host})`, 240);
+  const sourceLabel =
+    { generic: 'checklist genérico', ai: 'generado por IA', custom: 'creado a mano' }[
+      manualCase.source
+    ] || String(manualCase.source ?? '');
+
+  const meta = [
+    [adfText('URL escaneada: ', { strong: true }), adfText(scan.url)],
+    [adfText('Caso: ', { strong: true }), adfText(String(manualCase.title))],
+    [adfText('Categoría: ', { strong: true }), adfText(String(manualCase.category))],
+    [adfText('Prioridad: ', { strong: true }), adfText(String(manualCase.priority ?? 'n/a'))],
+    [adfText('Origen del caso: ', { strong: true }), adfText(sourceLabel)],
+    [adfText('Scan ID: ', { strong: true }), adfText(scan.id, { code: true })],
+  ];
+
+  const blocks = [
+    adfParagraph(
+      'Bug reportado desde el runner de casos manuales de QA Forge — un caso de prueba manual falló.',
+    ),
+    adfHeading('Detalle', 3),
+    adfBulletList(meta),
+  ];
+
+  if (manualCase.description) {
+    blocks.push(adfHeading('Descripción del caso', 3));
+    blocks.push(adfParagraph(truncate(manualCase.description, 1500)));
+  }
+
+  if (Array.isArray(manualCase.steps) && manualCase.steps.length > 0) {
+    blocks.push(adfHeading('Pasos esperados', 3));
+    blocks.push(
+      adfBulletList(
+        manualCase.steps
+          .slice(0, 30)
+          .map((s, i) => `${i + 1}. ${truncate(s.action, 200)} → ${truncate(s.expected, 200)}`),
+      ),
+    );
+  }
+
+  if (manualCase.notes) {
+    blocks.push(adfHeading('Nota de ejecución del QA', 3));
+    blocks.push(adfParagraph(truncate(manualCase.notes, 2000)));
+  }
+
+  if (reportUrl) {
+    blocks.push(
+      adfParagraph([adfText('Reporte completo: '), adfText(reportUrl, { href: reportUrl })]),
+    );
+  }
+
+  blocks.push(adfParagraph([adfText('Generado por QA Forge · runner manual', { code: true })]));
+
+  return {
+    summary,
+    descriptionAdf: adfDoc(blocks),
+    labels: ['qa-forge', 'qa-manual', `qa-${manualCase.category}`],
+  };
+}

@@ -206,6 +206,38 @@ export async function deleteManualRunItem(scanId, caseKey) {
   await api.delete(`/api/manual-cases/${scanId}/run/${encodeURIComponent(caseKey)}`);
 }
 
+/** Upsert masivo de estados (aplicar sugerencias, marcar categoría, etc.). */
+export async function bulkSaveManualRun(scanId, items) {
+  const { data } = await api.put(`/api/manual-cases/${scanId}/run/bulk`, { items });
+  return data.items;
+}
+
+/** Resetea el runner: borra todos los items trackeados del scan. */
+export async function resetManualRun(scanId) {
+  await api.delete(`/api/manual-cases/${scanId}/run`);
+}
+
+/** Lista las corridas archivadas (snapshots) del scan. */
+export async function getManualRunSnapshots(scanId) {
+  const { data } = await api.get(`/api/manual-cases/${scanId}/run/snapshots`);
+  return data.snapshots;
+}
+
+/** Archiva la corrida actual como snapshot. Con reset=true limpia el runner. */
+export async function createManualRunSnapshot(scanId, { label, reset, items }) {
+  const { data } = await api.post(`/api/manual-cases/${scanId}/run/snapshots`, {
+    label,
+    reset: Boolean(reset),
+    items,
+  });
+  return data.snapshot;
+}
+
+/** Borra una corrida archivada. */
+export async function deleteManualRunSnapshot(scanId, snapshotId) {
+  await api.delete(`/api/manual-cases/${scanId}/run/snapshots/${snapshotId}`);
+}
+
 // ─── Scheduled scans (FASE 8.6) ─────────────────────────────────────────
 
 export async function listSchedules() {

@@ -1,16 +1,28 @@
 // ManualRunner — runner de ejecución de casos de prueba manuales (FASE 9).
 // Unifica 3 fuentes en desplegables verticales por categoría: el checklist
 // genérico fijo, los casos generados por IA y los casos custom del usuario.
-// Cada caso se marca pass/fail/blocked/skip y admite notas de ejecución; todo
-// se persiste por scan vía /api/manual-cases/:scanId/run.
+// Cada caso se marca pass/fail/blocked/skip y admite notas de ejecución.
+// Además: sugerencias de pass/fail derivadas de los tests automáticos del
+// scan, filtros/búsqueda, acciones masivas, bug en Jira desde un FAIL e
+// historial de corridas (snapshots). Todo se persiste por scan.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  bulkSaveManualRun,
+  createJiraIssue,
+  createManualRunSnapshot,
   deleteManualRunItem,
+  deleteManualRunSnapshot,
+  getJiraConfig,
   getManualRun,
+  getManualRunSnapshots,
+  listJiraIssues,
+  listJiraProjects,
+  resetManualRun,
   saveManualRunItem,
 } from '../lib/api.js';
+import { ManualRunSnapshots } from './ManualRunSnapshots.jsx';
 
 const CATEGORY_LABEL = {
   functional: 'Funcional',
@@ -49,24 +61,48 @@ const EMPTY_FORM = { title: '', category: 'functional', priority: 'medium', desc
 export function ManualRunner({ scanId, aiCases }) {
   const [catalog, setCatalog] = useState([]);
   const [items, setItems] = useState([]);
+  const [suggestions, setSuggestions] = useState({});
+  const [snapshots, setSnapshots] = useState([]);
+  const [jira, setJira] = useState({ configured: false, projects: [], defaultProjectKey: '', defaultIssueType: 'Bug' });
+  const [jiraIssues, setJiraIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [saveState, setSaveState] = useState('idle'); // idle | saving | saved | error
   const [openCategories, setOpenCategories] = useState({});
+
+  // Formulario de caso custom (alta y edición comparten el form).
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [editKey, setEditKey] = useState(null); // caseKey si estamos editando
   const [creating, setCreating] = useState(false);
 
-  // Carga inicial del runner (catálogo genérico + items trackeados).
+  // Filtros del runner.
+  const [statusFilter, setStatusFilter] = useState(() => new Set());
+  const [sourceFilter, setSourceFilter] = useState(() => new Set());
+  const [query, setQuery] = useState('');
+
+  // Cerrar corrida (snapshot).
+  const [showClose, setShowClose] = useState(false);
+  const [closeLabel, setCloseLabel] = useState('');
+  const [closeReset, setCloseReset] = useState(true);
+  const [closing, setClosing] = useState(false);
+
+  // Carga inicial: runner + snapshots + (best-effort) Jira.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getManualRun(scanId)
-      .then((data) => {
+
+    Promise.all([
+      getManualRun(scanId),
+      getManualRunSnapshots(scanId).catch(() => []),
+    ])
+      .then(([run, snaps]) => {
         if (cancelled) return;
-        setCatalog(data.catalog ?? []);
-        setItems(data.items ?? []);
+        setCatalog(run.catalog ?? []);
+        setItems(run.items ?? []);
+        setSuggestions(run.suggestions ?? {});
+        setSnapshots(snaps ?? []);
       })
       .catch((err) => {
         if (!cancelled) setError(err?.response?.data?.message ?? err?.message ?? 'Error cargando el runner');
@@ -74,19 +110,46 @@ export function ManualRunner({ scanId, aiCases }) {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
+    // Jira es opcional — si no está configurado, simplemente no mostramos el botón.
+    getJiraConfig()
+      .then((cfg) => {
+        if (cancelled || !cfg?.configured) return;
+        setJira((j) => ({
+          ...j,
+          configured: true,
+          defaultProjectKey: cfg.config?.defaultProjectKey ?? '',
+          defaultIssueType: cfg.config?.defaultIssueType ?? 'Bug',
+        }));
+        Promise.all([
+          listJiraProjects().catch(() => []),
+          listJiraIssues(scanId).catch(() => []),
+        ]).then(([projects, issues]) => {
+          if (cancelled) return;
+          setJira((j) => ({ ...j, projects: projects ?? [] }));
+          setJiraIssues(issues ?? []);
+        });
+      })
+      .catch(() => {});
+
     return () => {
       cancelled = true;
     };
   }, [scanId]);
 
-  // Mapa caseKey → item trackeado, para resolver estado/notas de cada caso.
   const runMap = useMemo(() => {
     const map = {};
     for (const it of items) map[it.caseKey] = it;
     return map;
   }, [items]);
 
-  // Lista unificada de casos: genéricos + IA + custom, con shape homogéneo.
+  const jiraByCase = useMemo(() => {
+    const map = {};
+    for (const iss of jiraIssues) map[iss.resultId] = iss;
+    return map;
+  }, [jiraIssues]);
+
+  // Lista unificada de casos con shape homogéneo.
   const allCases = useMemo(() => {
     const generic = (catalog ?? []).map((c) => ({
       caseKey: c.key,
@@ -130,7 +193,6 @@ export function ManualRunner({ scanId, aiCases }) {
     return out;
   }, [allCases]);
 
-  // Resumen global de progreso.
   const summary = useMemo(() => {
     const counts = { pending: 0, pass: 0, fail: 0, blocked: 0, skipped: 0 };
     for (const tc of allCases) {
@@ -142,11 +204,46 @@ export function ManualRunner({ scanId, aiCases }) {
     return { ...counts, total, executed, pct: total ? Math.round((executed / total) * 100) : 0 };
   }, [allCases, runMap]);
 
+  // Sugerencias aún sin aplicar (caso genérico, pendiente, con sugerencia).
+  const pendingSuggestions = useMemo(
+    () =>
+      allCases.filter(
+        (tc) =>
+          tc.source === 'generic' &&
+          suggestions[tc.caseKey] &&
+          (runMap[tc.caseKey]?.status ?? 'pending') === 'pending',
+      ),
+    [allCases, suggestions, runMap],
+  );
+
+  const filterActive = statusFilter.size > 0 || sourceFilter.size > 0 || query.trim() !== '';
+
+  function matchesFilter(tc, status) {
+    if (statusFilter.size && !statusFilter.has(status)) return false;
+    if (sourceFilter.size && !sourceFilter.has(tc.source)) return false;
+    if (query.trim() && !tc.title.toLowerCase().includes(query.trim().toLowerCase())) return false;
+    return true;
+  }
+
   const toggleCategory = (cat) => setOpenCategories((p) => ({ ...p, [cat]: p[cat] === false }));
+
+  const toggleSet = (setter) => (value) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      next.has(value) ? next.delete(value) : next.add(value);
+      return next;
+    });
+  const toggleStatusFilter = toggleSet(setStatusFilter);
+  const toggleSourceFilter = toggleSet(setSourceFilter);
+
+  const clearFilters = () => {
+    setStatusFilter(new Set());
+    setSourceFilter(new Set());
+    setQuery('');
+  };
 
   // ── Persistencia ──────────────────────────────────────────────────────────
 
-  /** Upsert optimista de un item del runner (estado o notas). */
   async function patchRun(caseKey, source, patch) {
     setItems((prev) => applyLocal(prev, { caseKey, source, ...patch }));
     setSaveState('saving');
@@ -166,35 +263,57 @@ export function ManualRunner({ scanId, aiCases }) {
     }
   }
 
-  /** Crea un caso custom a partir del formulario. */
-  async function handleCreateCustom(e) {
+  async function handleSubmitCustom(e) {
     e.preventDefault();
     if (!form.title.trim()) return;
     setCreating(true);
     setError(null);
     try {
-      const saved = await saveManualRunItem(scanId, {
-        source: 'custom',
-        payload: {
-          title: form.title.trim(),
-          category: form.category,
-          priority: form.priority,
-          description: form.description.trim() || null,
-        },
+      const payload = {
+        title: form.title.trim(),
+        category: form.category,
+        priority: form.priority,
+        description: form.description.trim() || null,
+      };
+      const body = editKey
+        ? { caseKey: editKey, source: 'custom', payload }
+        : { source: 'custom', payload };
+      const saved = await saveManualRunItem(scanId, body);
+      setItems((prev) => {
+        const idx = prev.findIndex((i) => i.caseKey === saved.caseKey);
+        if (idx === -1) return [...prev, saved];
+        const next = [...prev];
+        next[idx] = saved;
+        return next;
       });
-      setItems((prev) => [...prev, saved]);
       setForm(EMPTY_FORM);
+      setEditKey(null);
       setShowForm(false);
-      // Asegura que la categoría del caso nuevo quede expandida para verlo.
-      setOpenCategories((p) => ({ ...p, [saved.payload?.category ?? 'functional']: true }));
+      setOpenCategories((p) => ({ ...p, [payload.category]: true }));
     } catch (err) {
-      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo crear el caso');
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo guardar el caso');
     } finally {
       setCreating(false);
     }
   }
 
-  /** Borra un caso custom. */
+  function startEdit(tc) {
+    setEditKey(tc.caseKey);
+    setForm({
+      title: tc.title,
+      category: tc.category,
+      priority: tc.priority,
+      description: tc.description ?? '',
+    });
+    setShowForm(true);
+  }
+
+  function startCreate() {
+    setEditKey(null);
+    setForm(EMPTY_FORM);
+    setShowForm((v) => !v);
+  }
+
   async function handleDeleteCustom(caseKey) {
     setItems((prev) => prev.filter((i) => i.caseKey !== caseKey));
     try {
@@ -204,10 +323,91 @@ export function ManualRunner({ scanId, aiCases }) {
     }
   }
 
+  /** Aplica un upsert masivo y refresca el estado local con la respuesta. */
+  async function applyBulk(updates) {
+    if (!updates.length) return;
+    setSaveState('saving');
+    try {
+      const fresh = await bulkSaveManualRun(scanId, updates);
+      setItems(fresh);
+      setSaveState('saved');
+    } catch (err) {
+      setSaveState('error');
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo aplicar la acción masiva');
+    }
+  }
+
+  const applyAllSuggestions = () =>
+    applyBulk(
+      pendingSuggestions.map((tc) => ({
+        caseKey: tc.caseKey,
+        source: 'generic',
+        status: suggestions[tc.caseKey].status,
+      })),
+    );
+
+  const bulkMarkCategory = (cat, status) =>
+    applyBulk(
+      grouped[cat]
+        .filter((tc) => (runMap[tc.caseKey]?.status ?? 'pending') === 'pending')
+        .map((tc) => ({ caseKey: tc.caseKey, source: tc.source, status })),
+    );
+
+  async function handleReset() {
+    if (!window.confirm('¿Resetear la corrida? Todos los casos vuelven a "pendiente".')) return;
+    try {
+      await resetManualRun(scanId);
+      setItems([]);
+      setSaveState('saved');
+    } catch (err) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo resetear');
+    }
+  }
+
+  async function handleCloseRun() {
+    if (!closeLabel.trim()) return;
+    setClosing(true);
+    setError(null);
+    try {
+      const snapItems = allCases.map((tc) => ({
+        caseKey: tc.caseKey,
+        source: tc.source,
+        title: tc.title,
+        category: tc.category,
+        priority: tc.priority,
+        status: runMap[tc.caseKey]?.status ?? 'pending',
+        notes: runMap[tc.caseKey]?.notes ?? null,
+      }));
+      const snap = await createManualRunSnapshot(scanId, {
+        label: closeLabel.trim(),
+        reset: closeReset,
+        items: snapItems,
+      });
+      setSnapshots((prev) => [snap, ...prev]);
+      if (closeReset) setItems([]);
+      setShowClose(false);
+      setCloseLabel('');
+    } catch (err) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo cerrar la corrida');
+    } finally {
+      setClosing(false);
+    }
+  }
+
+  async function handleDeleteSnapshot(id) {
+    if (!window.confirm('¿Borrar esta corrida archivada?')) return;
+    setSnapshots((prev) => prev.filter((s) => s.id !== id));
+    try {
+      await deleteManualRunSnapshot(scanId, id);
+    } catch (err) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo borrar la corrida');
+    }
+  }
+
   // ── Export ────────────────────────────────────────────────────────────────
 
-  const exportRows = () =>
-    allCases.map((tc) => {
+  const handleExport = (format) => {
+    const rows = allCases.map((tc) => {
       const run = runMap[tc.caseKey];
       return {
         caseKey: tc.caseKey,
@@ -220,9 +420,6 @@ export function ManualRunner({ scanId, aiCases }) {
         executedAt: run?.executedAt ?? '',
       };
     });
-
-  const handleExport = (format) => {
-    const rows = exportRows();
     if (format === 'json') {
       downloadBlob(JSON.stringify(rows, null, 2), `qa-forge-runner-${scanId}.json`, 'application/json');
     } else if (format === 'csv') {
@@ -242,6 +439,12 @@ export function ManualRunner({ scanId, aiCases }) {
     );
   }
 
+  const visibleCategories = CATEGORY_ORDER.filter((cat) => {
+    const cases = grouped[cat] ?? [];
+    if (!cases.length) return false;
+    return cases.some((tc) => matchesFilter(tc, runMap[tc.caseKey]?.status ?? 'pending'));
+  });
+
   return (
     <section className="mt-8" data-testid="manual-runner">
       <div className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-5">
@@ -255,11 +458,25 @@ export function ManualRunner({ scanId, aiCases }) {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={() => setShowForm((v) => !v)}
+              onClick={startCreate}
               className="rounded-md border border-emerald-500/40 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/10"
               data-testid="add-custom-case-btn"
             >
               {showForm ? 'Cerrar' : '+ Agregar caso'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowClose((v) => !v)}
+              className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-500/60 hover:text-emerald-300"
+            >
+              Cerrar corrida
+            </button>
+            <button
+              type="button"
+              onClick={handleReset}
+              className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-400 hover:border-red-500/60 hover:text-red-300"
+            >
+              Resetear
             </button>
             {['md', 'csv', 'json'].map((fmt) => (
               <button
@@ -268,13 +485,13 @@ export function ManualRunner({ scanId, aiCases }) {
                 onClick={() => handleExport(fmt)}
                 className="rounded-md border border-slate-700 bg-slate-900/60 px-3 py-1.5 text-xs text-slate-200 hover:border-emerald-500/60 hover:text-emerald-300"
               >
-                Exportar {fmt.toUpperCase()}
+                {fmt.toUpperCase()}
               </button>
             ))}
           </div>
         </header>
 
-        {/* Barra de progreso global */}
+        {/* Progreso global */}
         <div className="mt-4">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="text-slate-400">
@@ -289,12 +506,27 @@ export function ManualRunner({ scanId, aiCases }) {
             </span>
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800">
-            <div
-              className="h-full bg-emerald-500 transition-all"
-              style={{ width: `${summary.pct}%` }}
-            />
+            <div className="h-full bg-emerald-500 transition-all" style={{ width: `${summary.pct}%` }} />
           </div>
         </div>
+
+        {/* Sugerencias del scan automático */}
+        {pendingSuggestions.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-2">
+            <span className="text-xs text-violet-200">
+              💡 El scan automático ya responde {pendingSuggestions.length} caso
+              {pendingSuggestions.length === 1 ? '' : 's'} del checklist.
+            </span>
+            <button
+              type="button"
+              onClick={applyAllSuggestions}
+              className="rounded-md border border-violet-500/50 bg-violet-500/20 px-3 py-1 text-xs font-medium text-violet-100 hover:bg-violet-500/30"
+              data-testid="apply-all-suggestions"
+            >
+              Aplicar {pendingSuggestions.length} sugerencia{pendingSuggestions.length === 1 ? '' : 's'}
+            </button>
+          </div>
+        ) : null}
 
         {saveState === 'error' || error ? (
           <p className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-300">
@@ -306,13 +538,56 @@ export function ManualRunner({ scanId, aiCases }) {
           <p className="mt-3 text-xs text-emerald-400">✓ Cambios guardados</p>
         ) : null}
 
-        {/* Formulario de caso custom */}
+        {/* Filtros */}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar caso…"
+            className="rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+            data-testid="runner-search"
+          />
+          <span className="flex flex-wrap gap-1">
+            {STATUS_ORDER.map((s) => (
+              <FilterChip
+                key={s}
+                active={statusFilter.has(s)}
+                onClick={() => toggleStatusFilter(s)}
+                tone={STATUS_META[s].dot}
+              >
+                {STATUS_META[s].icon} {STATUS_META[s].label}
+              </FilterChip>
+            ))}
+          </span>
+          <span className="flex flex-wrap gap-1">
+            {Object.entries(SOURCE_META).map(([k, m]) => (
+              <FilterChip key={k} active={sourceFilter.has(k)} onClick={() => toggleSourceFilter(k)}>
+                {m.label}
+              </FilterChip>
+            ))}
+          </span>
+          {filterActive ? (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="text-xs text-slate-500 underline hover:text-slate-300"
+            >
+              limpiar
+            </button>
+          ) : null}
+        </div>
+
+        {/* Formulario de caso custom (alta / edición) */}
         {showForm ? (
           <form
-            onSubmit={handleCreateCustom}
+            onSubmit={handleSubmitCustom}
             className="mt-4 space-y-3 rounded-lg border border-slate-800 bg-slate-950/50 p-4"
             data-testid="custom-case-form"
           >
+            <p className="text-xs uppercase tracking-widest text-slate-500">
+              {editKey ? 'Editar caso' : 'Nuevo caso manual'}
+            </p>
             <input
               type="text"
               value={form.title}
@@ -365,18 +640,62 @@ export function ManualRunner({ scanId, aiCases }) {
               disabled={creating || !form.title.trim()}
               className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {creating ? 'Agregando…' : 'Agregar caso'}
+              {creating ? 'Guardando…' : editKey ? 'Guardar cambios' : 'Agregar caso'}
             </button>
           </form>
+        ) : null}
+
+        {/* Cerrar corrida (snapshot) */}
+        {showClose ? (
+          <div className="mt-4 space-y-3 rounded-lg border border-slate-800 bg-slate-950/50 p-4">
+            <p className="text-xs uppercase tracking-widest text-slate-500">Cerrar corrida</p>
+            <p className="text-xs text-slate-500">
+              Archiva el estado actual de los {summary.total} casos como una corrida. Útil para
+              comparar rondas de regresión.
+            </p>
+            <input
+              type="text"
+              value={closeLabel}
+              onChange={(e) => setCloseLabel(e.target.value)}
+              placeholder="Nombre de la corrida (ej: Regresión sprint 12)"
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+              maxLength={120}
+            />
+            <label className="flex items-center gap-2 text-xs text-slate-400">
+              <input
+                type="checkbox"
+                checked={closeReset}
+                onChange={(e) => setCloseReset(e.target.checked)}
+              />
+              Resetear el runner después de archivar (empezar otra ronda)
+            </label>
+            <button
+              type="button"
+              onClick={handleCloseRun}
+              disabled={closing || !closeLabel.trim()}
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {closing ? 'Archivando…' : 'Archivar corrida'}
+            </button>
+          </div>
         ) : null}
       </div>
 
       {/* Desplegables verticales por categoría */}
       <div className="mt-4 space-y-3">
-        {CATEGORY_ORDER.filter((cat) => grouped[cat]?.length).map((cat) => {
+        {visibleCategories.length === 0 ? (
+          <p className="rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">
+            Ningún caso coincide con el filtro.
+          </p>
+        ) : null}
+        {visibleCategories.map((cat) => {
           const cases = grouped[cat];
+          const visible = cases.filter((tc) =>
+            matchesFilter(tc, runMap[tc.caseKey]?.status ?? 'pending'),
+          );
           const isOpen = openCategories[cat] !== false; // default abierto
           const catCounts = countByStatus(cases, runMap);
+          const hasPending = catCounts.pending > 0;
           return (
             <section
               key={cat}
@@ -394,7 +713,8 @@ export function ManualRunner({ scanId, aiCases }) {
                     {CATEGORY_LABEL[cat] || cat}
                   </h3>
                   <span className="text-xs text-slate-500">
-                    {cases.length} caso{cases.length === 1 ? '' : 's'}
+                    {filterActive ? `${visible.length}/${cases.length}` : cases.length} caso
+                    {cases.length === 1 ? '' : 's'}
                   </span>
                 </div>
                 <span className="flex gap-2">
@@ -406,29 +726,70 @@ export function ManualRunner({ scanId, aiCases }) {
                 </span>
               </button>
               {isOpen ? (
-                <ul className="divide-y divide-slate-800/60 border-t border-slate-800/70">
-                  {cases.map((tc) => (
-                    <RunnerRow
-                      key={tc.caseKey}
-                      testCase={tc}
-                      run={runMap[tc.caseKey]}
-                      onStatus={(status) => patchRun(tc.caseKey, tc.source, { status })}
-                      onNotes={(notes) => patchRun(tc.caseKey, tc.source, { notes })}
-                      onDelete={tc.source === 'custom' ? () => handleDeleteCustom(tc.caseKey) : null}
-                    />
-                  ))}
-                </ul>
+                <div className="border-t border-slate-800/70">
+                  {hasPending ? (
+                    <div className="flex items-center gap-2 bg-slate-950/30 px-5 py-2 text-xs text-slate-500">
+                      Marcar {catCounts.pending} pendiente{catCounts.pending === 1 ? '' : 's'}:
+                      <button
+                        type="button"
+                        onClick={() => bulkMarkCategory(cat, 'pass')}
+                        className="rounded border border-emerald-500/40 px-2 py-0.5 text-emerald-300 hover:bg-emerald-500/10"
+                      >
+                        ✓ Pass
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => bulkMarkCategory(cat, 'skipped')}
+                        className="rounded border border-sky-500/40 px-2 py-0.5 text-sky-300 hover:bg-sky-500/10"
+                      >
+                        » Skip
+                      </button>
+                    </div>
+                  ) : null}
+                  <ul className="divide-y divide-slate-800/60">
+                    {visible.map((tc) => (
+                      <RunnerRow
+                        key={tc.caseKey}
+                        testCase={tc}
+                        run={runMap[tc.caseKey]}
+                        suggestion={tc.source === 'generic' ? suggestions[tc.caseKey] : null}
+                        jira={jira}
+                        existingIssue={jiraByCase[tc.caseKey]}
+                        onStatus={(status) => patchRun(tc.caseKey, tc.source, { status })}
+                        onNotes={(notes) => patchRun(tc.caseKey, tc.source, { notes })}
+                        onDelete={tc.source === 'custom' ? () => handleDeleteCustom(tc.caseKey) : null}
+                        onEdit={tc.source === 'custom' ? () => startEdit(tc) : null}
+                        onJiraCreated={(issue) => setJiraIssues((prev) => [issue, ...prev])}
+                        scanId={scanId}
+                      />
+                    ))}
+                  </ul>
+                </div>
               ) : null}
             </section>
           );
         })}
       </div>
+
+      <ManualRunSnapshots snapshots={snapshots} onDelete={handleDeleteSnapshot} />
     </section>
   );
 }
 
-/** Fila de un caso con control de estado, detalle expandible y notas. */
-function RunnerRow({ testCase, run, onStatus, onNotes, onDelete }) {
+/** Fila de un caso con control de estado, sugerencia, detalle, notas y Jira. */
+function RunnerRow({
+  testCase,
+  run,
+  suggestion,
+  jira,
+  existingIssue,
+  onStatus,
+  onNotes,
+  onDelete,
+  onEdit,
+  onJiraCreated,
+  scanId,
+}) {
   const [expanded, setExpanded] = useState(false);
   const status = run?.status ?? 'pending';
   const priorityClass = PRIORITY_TONE[testCase.priority] ?? PRIORITY_TONE.medium;
@@ -436,6 +797,8 @@ function RunnerRow({ testCase, run, onStatus, onNotes, onDelete }) {
   const statusDot = STATUS_META[status]?.dot ?? STATUS_META.pending.dot;
   const hasDetail =
     testCase.description || testCase.steps?.length || testCase.preconditions?.length;
+  const showSuggestion = suggestion && status === 'pending';
+  const canFileBug = jira?.configured && (status === 'fail' || status === 'blocked');
 
   return (
     <li className="px-5 py-3" data-testid={`runner-row-${testCase.caseKey}`}>
@@ -490,6 +853,16 @@ function RunnerRow({ testCase, run, onStatus, onNotes, onDelete }) {
               </button>
             );
           })}
+          {onEdit ? (
+            <button
+              type="button"
+              title="Editar caso"
+              onClick={onEdit}
+              className="rounded-md border border-slate-700 bg-slate-900/60 px-2 py-1 text-[11px] text-slate-500 hover:border-emerald-500/60 hover:text-emerald-300"
+            >
+              ✎
+            </button>
+          ) : null}
           {onDelete ? (
             <button
               type="button"
@@ -504,18 +877,191 @@ function RunnerRow({ testCase, run, onStatus, onNotes, onDelete }) {
         </div>
       </div>
 
+      {/* Sugerencia del scan automático */}
+      {showSuggestion ? (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-violet-500/30 bg-violet-500/10 px-3 py-1.5">
+          <span className="text-xs text-violet-200">
+            💡 Sugerido: <strong>{STATUS_META[suggestion.status]?.label}</strong> — {suggestion.reason}
+          </span>
+          <button
+            type="button"
+            onClick={() => onStatus(suggestion.status)}
+            className="rounded border border-violet-500/50 bg-violet-500/20 px-2 py-0.5 text-xs font-medium text-violet-100 hover:bg-violet-500/30"
+          >
+            Aplicar
+          </button>
+        </div>
+      ) : null}
+
       {expanded && hasDetail ? (
         <div className="mt-3 rounded-lg border border-slate-800/60 bg-slate-950/40 px-4 py-3">
           <CaseDetail testCase={testCase} />
         </div>
       ) : null}
 
-      <RunnerNotes
-        key={testCase.caseKey}
-        initial={run?.notes ?? ''}
-        onSave={onNotes}
-      />
+      <RunnerNotes key={testCase.caseKey} initial={run?.notes ?? ''} onSave={onNotes} />
+
+      {/* Bug en Jira para casos fallados/bloqueados */}
+      {canFileBug || existingIssue ? (
+        <div className="mt-2">
+          <ManualJiraBug
+            scanId={scanId}
+            testCase={testCase}
+            runNotes={run?.notes}
+            jira={jira}
+            existingIssue={existingIssue}
+            onCreated={onJiraCreated}
+          />
+        </div>
+      ) : null}
     </li>
+  );
+}
+
+/** Botón "Crear bug en Jira" para un caso manual con FAIL/BLOCKED. */
+function ManualJiraBug({ scanId, testCase, runNotes, jira, existingIssue, onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [projectKey, setProjectKey] = useState(jira?.defaultProjectKey || '');
+  const [issueType, setIssueType] = useState(jira?.defaultIssueType || 'Bug');
+  const [summary, setSummary] = useState(`[QA Forge] Caso manual FAIL — ${testCase.title}`);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  if (existingIssue) {
+    return (
+      <a
+        href={existingIssue.issueUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
+        title={existingIssue.summary}
+      >
+        🐞 {existingIssue.issueKey} ↗
+      </a>
+    );
+  }
+
+  const handleCreate = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const manualCase = {
+        caseKey: testCase.caseKey,
+        source: testCase.source,
+        title: testCase.title,
+        category: testCase.category,
+        priority: testCase.priority,
+        description: testCase.description ?? null,
+        notes: runNotes ?? null,
+        steps: testCase.source === 'ai' ? testCase.steps : undefined,
+      };
+      const issue = await createJiraIssue({
+        scanId,
+        manualCase,
+        projectKey: projectKey.trim() || undefined,
+        issueType: issueType.trim() || undefined,
+        summary: summary.trim() || undefined,
+      });
+      setOpen(false);
+      onCreated?.(issue);
+    } catch (err) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo crear el bug en Jira');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1 rounded-md border border-slate-600 bg-slate-900/60 px-2.5 py-1 text-xs text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300"
+        data-testid={`jira-bug-btn-${testCase.caseKey}`}
+      >
+        🐞 Crear bug
+      </button>
+    );
+  }
+
+  return (
+    <div className="w-full rounded-md border border-slate-700 bg-slate-950/70 p-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest text-slate-500">Proyecto</span>
+          {jira?.projects?.length > 0 ? (
+            <select
+              value={projectKey}
+              onChange={(e) => setProjectKey(e.target.value)}
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 focus:border-emerald-500 focus:outline-none"
+            >
+              <option value="">(elegir)</option>
+              {jira.projects.map((p) => (
+                <option key={p.id} value={p.key}>
+                  {p.key} — {p.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={projectKey}
+              onChange={(e) => setProjectKey(e.target.value.toUpperCase())}
+              placeholder="ej: QA"
+              className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 focus:border-emerald-500 focus:outline-none"
+            />
+          )}
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-widest text-slate-500">Tipo de issue</span>
+          <input
+            type="text"
+            value={issueType}
+            onChange={(e) => setIssueType(e.target.value)}
+            placeholder="Bug"
+            className="mt-1 w-full rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 focus:border-emerald-500 focus:outline-none"
+          />
+        </label>
+      </div>
+      <label className="mt-2 block">
+        <span className="text-[10px] uppercase tracking-widest text-slate-500">Título</span>
+        <textarea
+          value={summary}
+          onChange={(e) => setSummary(e.target.value)}
+          rows={2}
+          className="mt-1 w-full resize-y rounded border border-slate-700 bg-slate-950 px-2 py-1.5 text-xs text-slate-100 focus:border-emerald-500 focus:outline-none"
+        />
+      </label>
+      <p className="mt-1 text-[10px] text-slate-500">
+        La descripción se completa con el caso, los pasos y la nota de ejecución.
+      </p>
+      {error ? (
+        <p className="mt-2 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-300">
+          {error}
+        </p>
+      ) : null}
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          onClick={handleCreate}
+          disabled={submitting}
+          className="rounded bg-emerald-500 px-3 py-1 text-xs font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-60"
+        >
+          {submitting ? 'Creando…' : 'Crear bug en Jira'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setError(null);
+          }}
+          disabled={submitting}
+          className="rounded border border-slate-700 px-3 py-1 text-xs text-slate-300 hover:text-slate-100"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -630,6 +1176,23 @@ function Tally({ status, n }) {
     <span className={`${meta.dot} font-medium`}>
       {meta.icon} {n}
     </span>
+  );
+}
+
+/** Chip de filtro toggleable. */
+function FilterChip({ active, onClick, tone, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+        active
+          ? `border-emerald-500/60 bg-emerald-500/15 ${tone ?? 'text-emerald-300'}`
+          : 'border-slate-700 bg-slate-900/60 text-slate-400 hover:border-slate-500'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
