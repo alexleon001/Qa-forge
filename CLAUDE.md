@@ -174,7 +174,7 @@ ninguna de esas cosas, por eso el split.
    - `PAGESPEED_API_KEY` (opcional)
    - `NODE_ENV=production`
 5. Generar un dominio público (Settings → Networking → Generate Domain).
-   Anotá la URL (`https://qaforge-backend-production.up.railway.app`).
+   Anotá la URL (en prod es `https://qa-forge-production.up.railway.app`).
 6. Healthcheck: `/api/health` (ya configurado en `railway.toml`).
 
 ### 2. Vercel — frontend
@@ -382,7 +382,8 @@ ninguna de esas cosas, por eso el split.
 
 **Producción live**:
 - Frontend: https://qaforge-chi.vercel.app
-- Backend: Railway service `Qa-forge` con plugins Postgres + Redis
+- Backend: https://qa-forge-production.up.railway.app (Railway service `Qa-forge`
+  con plugins Postgres + Redis). Plan **Hobby** desde 2026-05-20 (el trial expiró).
 
 ### Sesión 2026-05-13 (post-deploy) — Mejoras UX + bugs críticos
 
