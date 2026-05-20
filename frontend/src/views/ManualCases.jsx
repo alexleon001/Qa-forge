@@ -21,6 +21,7 @@ export function ManualCases() {
   const [usageNote, setUsageNote] = useState(null);
   const [providers, setProviders] = useState([]);
   const [selectedProvider, setSelectedProvider] = useState(null);
+  const [genOpen, setGenOpen] = useState(true); // panel de generación IA colapsable
 
   useEffect(() => {
     let cancelled = false;
@@ -36,7 +37,11 @@ export function ManualCases() {
     ])
       .then(([manualData, providersData]) => {
         if (cancelled) return;
-        setTestCases(manualData.testCases ?? []);
+        const cases = manualData.testCases ?? [];
+        setTestCases(cases);
+        // Si ya hay casos IA generados, arrancar con el panel colapsado para
+        // dar prioridad al runner; si no hay, dejarlo abierto para generarlos.
+        setGenOpen(cases.length === 0);
         setProviders(providersData.providers ?? []);
         const configured = (providersData.providers ?? []).filter((p) => p.configured);
         const pick =
@@ -130,75 +135,96 @@ export function ManualCases() {
         </div>
       </header>
 
-      {/* Generación con IA — alimenta los casos "IA" del runner */}
-      <div className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-5">
-        <h2 className="text-base font-semibold text-slate-100">🤖 Generar casos con IA</h2>
-        <p className="mt-1 mb-4 text-xs text-slate-500">
-          Genera una batería de casos a medida del sitio escaneado. Aparecen en el runner
-          como casos <span className="text-violet-300">IA</span>, junto al checklist genérico.
-        </p>
+      {/* Generación con IA — panel colapsable (alimenta los casos "IA" del runner) */}
+      <section className="overflow-hidden rounded-xl border border-slate-800/70 bg-slate-900/40">
+        <button
+          type="button"
+          onClick={() => setGenOpen((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left hover:bg-slate-900/70"
+          aria-expanded={genOpen}
+          data-testid="generate-panel-toggle"
+        >
+          <div className="flex items-center gap-3">
+            <span className="text-slate-400">{genOpen ? '▾' : '▸'}</span>
+            <h2 className="text-base font-semibold text-slate-100">🤖 Generar casos con IA</h2>
+            {hasCases ? (
+              <span className="rounded-full border border-violet-500/40 bg-violet-500/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-violet-300">
+                {testCases.length} {testCases.length === 1 ? 'caso IA' : 'casos IA'}
+              </span>
+            ) : null}
+          </div>
+        </button>
 
-        {providers.length > 0 ? (
-          <div className="mb-4">
-            <label className="block text-xs uppercase tracking-widest text-slate-500">
-              Provider de IA
-            </label>
-            <select
-              value={selectedProvider ?? ''}
-              onChange={(e) => setSelectedProvider(e.target.value)}
-              className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 sm:w-80"
-              data-testid="provider-select"
-            >
-              {providers.map((p) => (
-                <option key={p.id} value={p.id} disabled={!p.configured}>
-                  {p.label} ({p.defaultModel}){p.configured ? '' : ' — no configurado'}
-                  {p.isDefault ? ' · default' : ''}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-500">
-              Configurar API keys en <code>backend/.env</code>. Ollama corre local
-              en <code>:11434</code> (gratis, sin red).
+        {genOpen ? (
+          <div className="border-t border-slate-800/70 p-5">
+            <p className="mb-4 text-xs text-slate-500">
+              Genera una batería de casos a medida del sitio escaneado. Aparecen en el runner
+              como casos <span className="text-violet-300">IA</span>, junto al checklist genérico.
             </p>
+
+            {providers.length > 0 ? (
+              <div className="mb-4">
+                <label className="block text-xs uppercase tracking-widest text-slate-500">
+                  Provider de IA
+                </label>
+                <select
+                  value={selectedProvider ?? ''}
+                  onChange={(e) => setSelectedProvider(e.target.value)}
+                  className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 sm:w-80"
+                  data-testid="provider-select"
+                >
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id} disabled={!p.configured}>
+                      {p.label} ({p.defaultModel}){p.configured ? '' : ' — no configurado'}
+                      {p.isDefault ? ' · default' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Configurar API keys en <code>backend/.env</code>. Ollama corre local
+                  en <code>:11434</code> (gratis, sin red).
+                </p>
+              </div>
+            ) : null}
+
+            <label className="block text-xs uppercase tracking-widest text-slate-500">
+              Casos adicionales (opcional)
+            </label>
+            <textarea
+              rows={3}
+              value={additionalCases}
+              onChange={(e) => setAdditionalCases(e.target.value)}
+              placeholder="Ej: probar flujo de recuperación de contraseña con email inexistente"
+              className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              data-testid="additional-cases-input"
+            />
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={generating || loading}
+                onClick={() => handleGenerate({ force: hasCases })}
+                className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
+                data-testid="generate-manual-cases-btn"
+              >
+                {generating
+                  ? 'Generando…'
+                  : hasCases
+                    ? 'Regenerar casos IA'
+                    : 'Generar casos con IA'}
+              </button>
+              {usageNote ? <span className="text-xs text-slate-500">{usageNote}</span> : null}
+            </div>
+            {error ? (
+              <p
+                className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+                data-testid="manual-cases-error"
+              >
+                {error}
+              </p>
+            ) : null}
           </div>
         ) : null}
-
-        <label className="block text-xs uppercase tracking-widest text-slate-500">
-          Casos adicionales (opcional)
-        </label>
-        <textarea
-          rows={3}
-          value={additionalCases}
-          onChange={(e) => setAdditionalCases(e.target.value)}
-          placeholder="Ej: probar flujo de recuperación de contraseña con email inexistente"
-          className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-          data-testid="additional-cases-input"
-        />
-        <div className="mt-3 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            disabled={generating || loading}
-            onClick={() => handleGenerate({ force: hasCases })}
-            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
-            data-testid="generate-manual-cases-btn"
-          >
-            {generating
-              ? 'Generando…'
-              : hasCases
-                ? 'Regenerar casos IA'
-                : 'Generar casos con IA'}
-          </button>
-          {usageNote ? <span className="text-xs text-slate-500">{usageNote}</span> : null}
-        </div>
-        {error ? (
-          <p
-            className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300"
-            data-testid="manual-cases-error"
-          >
-            {error}
-          </p>
-        ) : null}
-      </div>
+      </section>
 
       {/* Runner: checklist genérico + casos IA + casos custom */}
       {loading ? (
