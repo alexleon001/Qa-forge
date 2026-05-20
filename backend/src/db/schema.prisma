@@ -147,6 +147,7 @@ model Scan {
   scripts Script[]
   screenshots Screenshot[]
   jiraIssues JiraIssueLink[]
+  manualRuns ManualCaseRun[]
 
   @@index([url])
   @@index([status])
@@ -203,5 +204,31 @@ model Script {
 
   scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
 
+  @@index([scanId])
+}
+
+// FASE 9: runner de casos de prueba manuales. Trackea el estado de ejecución
+// de cada caso para un scan. Cubre 3 fuentes (MANUAL_CASE_SOURCE):
+//   - `generic`: catálogo fijo GENERIC_TEST_CASES en shared/constants.js
+//   - `ai`:      casos generados por LLM (viven en Script framework="manual")
+//   - `custom`:  casos creados a mano por el usuario — su definición completa
+//                se guarda en `payload` (los otros 2 la toman de su origen).
+// caseKey es estable dentro del scan: para generic = item.key, para ai = tc.id,
+// para custom = "custom:<cuid>". El @@unique permite upsert idempotente.
+model ManualCaseRun {
+  id         String    @id @default(cuid())
+  scanId     String
+  source     String // generic | ai | custom
+  caseKey    String // identificador estable del caso dentro del scan
+  status     String    @default("pending") // pending | pass | fail | blocked | skipped
+  notes      String? // notas de ejecución del tester (qué falló, evidencia)
+  payload    Json? // definición del caso — solo para source=custom
+  executedAt DateTime? // última vez que se marcó un estado terminal (no-pending)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@unique([scanId, caseKey])
   @@index([scanId])
 }

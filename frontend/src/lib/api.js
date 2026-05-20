@@ -184,6 +184,28 @@ export async function getManualCases(scanId) {
   return data;
 }
 
+// ─── Runner de ejecución manual (FASE 9) ────────────────────────────────────
+
+/** Estado del runner: catálogo genérico fijo + items trackeados del scan. */
+export async function getManualRun(scanId) {
+  const { data } = await api.get(`/api/manual-cases/${scanId}/run`);
+  return data; // { scanId, catalog, items }
+}
+
+/**
+ * Upsert de un item del runner. `item` = { caseKey?, source, status?, notes?, payload? }.
+ * Para crear un caso custom: { source: 'custom', payload: { title, category, priority, description } }.
+ */
+export async function saveManualRunItem(scanId, item) {
+  const { data } = await api.put(`/api/manual-cases/${scanId}/run`, item);
+  return data.item;
+}
+
+/** Borra un item del runner (caso custom completo, o el tracking de uno generic/ai). */
+export async function deleteManualRunItem(scanId, caseKey) {
+  await api.delete(`/api/manual-cases/${scanId}/run/${encodeURIComponent(caseKey)}`);
+}
+
 // ─── Scheduled scans (FASE 8.6) ─────────────────────────────────────────
 
 export async function listSchedules() {
