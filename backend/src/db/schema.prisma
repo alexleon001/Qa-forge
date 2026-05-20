@@ -25,6 +25,45 @@ model User {
   apiKeys UserApiKey[]
   scans   Scan[]
   schedules ScheduledScan[]
+  jiraConfig JiraConfig?
+  jiraIssues JiraIssueLink[]
+}
+
+// FASE 8.10: integración con Jira. Una config por usuario (Jira Cloud:
+// baseUrl + email + API token). El token se cifra AES-256-GCM igual que las
+// API keys de IA. Permite crear bugs en Jira desde un Result con FAIL/WARNING.
+model JiraConfig {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  baseUrl           String // https://<org>.atlassian.net (sin trailing slash)
+  email             String // email de la cuenta Atlassian (auth Basic)
+  encryptedToken    String // API token cifrado — descifrado en runtime con SECRET_ENCRYPTION_KEY
+  hint              String // primeros 4 + últimos 4 chars del token, para identificarlo en UI
+  defaultProjectKey String? // proyecto preseleccionado al crear bugs
+  defaultIssueType  String   @default("Bug")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Enlace entre un Result (FAIL/WARNING) y el issue de Jira creado a partir de
+// él. Evita bugs duplicados y permite mostrar "bug ya creado: QA-123" en la UI.
+model JiraIssueLink {
+  id        String   @id @default(cuid())
+  userId    String
+  scanId    String
+  resultId  String
+  issueKey  String // ej. QA-123
+  issueUrl  String // deep link al issue en Jira
+  summary   String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scan Scan @relation(fields: [scanId], references: [id], onDelete: Cascade)
+
+  @@index([scanId])
+  @@index([resultId])
 }
 
 model UserApiKey {
@@ -107,6 +146,7 @@ model Scan {
   results Result[]
   scripts Script[]
   screenshots Screenshot[]
+  jiraIssues JiraIssueLink[]
 
   @@index([url])
   @@index([status])

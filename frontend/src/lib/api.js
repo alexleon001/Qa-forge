@@ -211,6 +211,42 @@ export async function validateCronExpr(cron, timezone) {
   return data;
 }
 
+// ─── Integración Jira (FASE 8.10) ───────────────────────────────────────
+
+export async function getJiraConfig() {
+  const { data } = await api.get('/api/integrations/jira');
+  return data; // { configured, config }
+}
+
+export async function saveJiraConfig(payload) {
+  const { data } = await api.put('/api/integrations/jira', payload);
+  return data;
+}
+
+export async function deleteJiraConfig() {
+  await api.delete('/api/integrations/jira');
+}
+
+export async function testJiraConnection(payload) {
+  const { data } = await api.post('/api/integrations/jira/test', payload ?? {});
+  return data; // { ok, user }
+}
+
+export async function listJiraProjects() {
+  const { data } = await api.get('/api/integrations/jira/projects');
+  return data.projects;
+}
+
+export async function listJiraIssues(scanId) {
+  const { data } = await api.get('/api/integrations/jira/issues', { params: { scanId } });
+  return data.issues;
+}
+
+export async function createJiraIssue(payload) {
+  const { data } = await api.post('/api/integrations/jira/issue', payload);
+  return data.issue;
+}
+
 /**
  * Descarga el reporte en json|html|pdf como archivo en el browser.
  * PDF se rutea por `aiApi` (timeout 180s) porque Playwright tarda en lanzar.

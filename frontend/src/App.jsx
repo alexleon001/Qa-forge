@@ -7,6 +7,7 @@ import { Compare } from './views/Compare.jsx';
 import { Dashboard } from './views/Dashboard.jsx';
 import { History } from './views/History.jsx';
 import { Home } from './views/Home.jsx';
+import { JiraSettings } from './views/JiraSettings.jsx';
 import { Login } from './views/Login.jsx';
 import { ManualCases } from './views/ManualCases.jsx';
 import { Register } from './views/Register.jsx';
@@ -102,6 +103,14 @@ export function App() {
             }
           />
           <Route
+            path="/settings/jira"
+            element={
+              <RequireAuth>
+                <JiraSettings />
+              </RequireAuth>
+            }
+          />
+          <Route
             path="/schedules"
             element={
               <RequireAuth>
@@ -148,6 +157,8 @@ function NavBar() {
       <Link to="/schedules" className="hover:text-slate-100">Schedules</Link>
       <span className="opacity-30">·</span>
       <Link to="/settings/api-keys" className="hover:text-slate-100">API Keys</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/settings/jira" className="hover:text-slate-100">Jira</Link>
       <span className="opacity-30">·</span>
       <span className="text-xs text-slate-500" title={user.email}>
         {user.name || user.email}

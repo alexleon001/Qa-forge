@@ -202,8 +202,8 @@ ninguna de esas cosas, por eso el split.
 
 ## Estado actual
 
-> **Última fase completada:** FASE 7 pasos 1 + 2 + 4 + 5 + 8 (FASE 7 cerrada en su roadmap acordado)
-> **Última sesión:** 2026-05-14 (FASE 7.4 login pre-flight + 7.5 crawler multi-página)
+> **Última fase completada:** FASE 8 COMPLETA (10/10 items + JUnit XML)
+> **Última sesión:** 2026-05-20 (FASE 8.10 integración Jira — cierra FASE 8)
 > **Producción**: https://qaforge-chi.vercel.app — con auth funcional + admin creado
 >
 > **Audiencia**: uso personal del owner + equipo chico de QA. **No comercial** (por ahora).
@@ -552,7 +552,25 @@ ninguna de esas cosas, por eso el split.
    - Frontend: panel "Visual regression" en ReportDetail con 3 thumbs
      (baseline | current | diff) o mensaje "primer scan" si recién se
      creó baseline. Deps nuevas: `pixelmatch`, `pngjs`.
-10. Integración Jira (crear bug desde un FAIL)
+10. ✅ **Integración Jira (crear bug desde un FAIL)** — implementado 2026-05-20
+    - Schema: `JiraConfig` (1 por usuario — baseUrl + email + `encryptedToken`
+      AES-256-GCM + `hint` + projectKey/issueType default) y `JiraIssueLink`
+      (enlaza un `Result` con el issue creado: `issueKey`, `issueUrl`, evita
+      bugs duplicados). Relaciones en `User` y `Scan` con `onDelete: Cascade`.
+    - `backend/src/integrations/jira.client.js`: cliente REST de Jira Cloud
+      (auth Basic email:token), `testConnection`/`listProjects`/`createIssue`,
+      helpers ADF (Atlassian Document Format — requerido por la API v3).
+      `JiraError` con `status`+`code` (lo consume el errorHandler directo).
+    - `backend/src/integrations/jira.issue.js`: arma summary + descripción ADF
+      desde un `Result` (URL, categoría, hallazgos: axe/links rotos/headers/
+      mismatch visual, link al reporte).
+    - API `/api/integrations/jira` (auth, scoped al user): `GET/PUT/DELETE` la
+      config, `POST /test` (valida contra `/myself`), `GET /projects`,
+      `GET /issues?scanId=`, `POST /issue` (crea bug desde scanId+resultId).
+    - UI: vista `/settings/jira` (config + probar conexión + proyecto default)
+      y botón **🐞 Crear bug** en cada `TestCard` con FAIL/WARNING del reporte
+      (panel inline; si ya hay bug muestra el link al issue). Link en NavBar.
+    - El token de Jira reusa `SECRET_ENCRYPTION_KEY`. No requiere envs nuevas.
 11. ✅ **JUnit XML export** — implementado 2026-05-14
     - `backend/src/reports/junit.template.js`: emite `<testsuites>` con un
       `<testsuite>` por categoría y un `<testcase>` por Result. Maps:

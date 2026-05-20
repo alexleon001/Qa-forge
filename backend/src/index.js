@@ -19,6 +19,7 @@ process.on('unhandledRejection', (reason) => {
 import { attachUser } from './api/middlewares/auth.middleware.js';
 import { authRouter } from './api/routes/auth.routes.js';
 import { errorHandler, notFoundHandler } from './api/middlewares/error.middleware.js';
+import { jiraRouter } from './api/routes/jira.routes.js';
 import { manualCasesRouter } from './api/routes/manualcases.routes.js';
 import { reportRouter } from './api/routes/report.routes.js';
 import { scanRouter } from './api/routes/scan.routes.js';
@@ -76,6 +77,7 @@ app.use('/api/report', reportRouter);
 app.use('/api/scripts', scriptsRouter);
 app.use('/api/manual-cases', manualCasesRouter);
 app.use('/api/schedules', schedulesRouter);
+app.use('/api/integrations/jira', jiraRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

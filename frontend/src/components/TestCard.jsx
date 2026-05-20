@@ -7,7 +7,7 @@ const STATUS_STYLES = {
   info: 'border-blue-500/40 bg-blue-500/5 text-blue-300',
 };
 
-export function TestCard({ result }) {
+export function TestCard({ result, actions }) {
   const tone = STATUS_STYLES[result.status] ?? STATUS_STYLES.info;
   return (
     <li
@@ -26,6 +26,10 @@ export function TestCard({ result }) {
       </div>
 
       {result.details ? <DetailsPreview details={result.details} /> : null}
+
+      {actions ? (
+        <div className="mt-2 flex flex-wrap items-start gap-2">{actions}</div>
+      ) : null}
     </li>
   );
 }

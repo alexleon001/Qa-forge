@@ -5,11 +5,21 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { ExportButton } from '../components/ExportButton.jsx';
+import { JiraBugButton } from '../components/JiraBugButton.jsx';
 import { NotesEditor } from '../components/NotesEditor.jsx';
 import { ScanTimer } from '../components/ScanTimer.jsx';
 import { ScoreGauge } from '../components/ScoreGauge.jsx';
 import { TestCard } from '../components/TestCard.jsx';
-import { getReport, getScan } from '../lib/api.js';
+import {
+  getJiraConfig,
+  getReport,
+  getScan,
+  listJiraIssues,
+  listJiraProjects,
+} from '../lib/api.js';
+
+// Statuses para los que tiene sentido abrir un bug en Jira.
+const FILEABLE = new Set(['fail', 'warning']);
 
 const CATEGORY_LABEL = {
   functional: 'Funcional',
@@ -29,6 +39,10 @@ export function ReportDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // Integración Jira (FASE 8.10): config + bugs ya creados para este scan.
+  const [jira, setJira] = useState({ configured: false, config: null, projects: [] });
+  const [issuesByResult, setIssuesByResult] = useState({});
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -36,11 +50,30 @@ export function ReportDetail() {
     Promise.all([
       getReport(scanId),
       getScan(scanId).catch(() => null),
+      getJiraConfig().catch(() => ({ configured: false, config: null })),
+      listJiraIssues(scanId).catch(() => []),
     ])
-      .then(([reportData, scanData]) => {
+      .then(([reportData, scanData, jiraData, issues]) => {
         if (cancelled) return;
         setReport(reportData);
         setScanMeta(scanData);
+        const byResult = {};
+        for (const it of issues) byResult[it.resultId] = it;
+        setIssuesByResult(byResult);
+        setJira({
+          configured: Boolean(jiraData?.configured),
+          config: jiraData?.config ?? null,
+          projects: [],
+        });
+        if (jiraData?.configured) {
+          listJiraProjects()
+            .then((projects) => {
+              if (!cancelled) setJira((prev) => ({ ...prev, projects }));
+            })
+            .catch(() => {
+              /* el dropdown cae a input de texto libre */
+            });
+        }
       })
       .catch((err) => {
         if (!cancelled) setError(err?.message ?? 'No se pudo cargar el reporte');
@@ -52,6 +85,10 @@ export function ReportDetail() {
       cancelled = true;
     };
   }, [scanId]);
+
+  const handleIssueCreated = (issue) => {
+    setIssuesByResult((prev) => ({ ...prev, [issue.resultId]: issue }));
+  };
 
   if (loading) {
     return (
@@ -167,6 +204,11 @@ export function ReportDetail() {
           title={CATEGORY_LABEL[cat] || cat}
           score={scoreByCategory[cat]}
           results={byCategory[cat]}
+          scanId={scanId}
+          scanUrl={scan.url}
+          jira={jira}
+          issuesByResult={issuesByResult}
+          onIssueCreated={handleIssueCreated}
         />
       ))}
     </section>
@@ -279,7 +321,16 @@ function ShotThumb({ label, src }) {
   );
 }
 
-function CategorySection({ title, score, results }) {
+function CategorySection({
+  title,
+  score,
+  results,
+  scanId,
+  scanUrl,
+  jira,
+  issuesByResult,
+  onIssueCreated,
+}) {
   return (
     <section className="mt-8">
       <header className="mb-3 flex items-baseline justify-between">
@@ -292,7 +343,24 @@ function CategorySection({ title, score, results }) {
       </header>
       <ul className="space-y-3">
         {results.map((result) => (
-          <TestCard key={result.id} result={result} />
+          <TestCard
+            key={result.id}
+            result={result}
+            actions={
+              jira.configured && FILEABLE.has(result.status) ? (
+                <JiraBugButton
+                  scanId={scanId}
+                  scanUrl={scanUrl}
+                  result={result}
+                  existingIssue={issuesByResult[result.id]}
+                  projects={jira.projects}
+                  defaultProjectKey={jira.config?.defaultProjectKey}
+                  defaultIssueType={jira.config?.defaultIssueType}
+                  onCreated={onIssueCreated}
+                />
+              ) : null
+            }
+          />
         ))}
       </ul>
     </section>
