@@ -607,8 +607,26 @@ ninguna de esas cosas, por eso el split.
     - Compatible con: GitHub Actions, GitLab CI, Jenkins (publish JUnit),
       CircleCI, Bitbucket Pipelines, Azure DevOps.
 
-**Fase 9 (evaluar)** — diferenciadores:
-12. AI auto-healing de selectores
+**Diferenciadores** (orden de prioridad acordado 2026-05-29: 12 → 13 → 15, después el resto):
+12. ✅ **AI auto-healing de selectores** — v1 implementada 2026-05-29 (solo Playwright).
+    - `backend/src/generators/selector.extract.js`: extrae selectores del script
+      Playwright con regex (`getByRole`/`getByTestId`/`getByText`/`getByLabel`/
+      `getByPlaceholder`/`locator`), los reconstruye con la API real de Playwright
+      (sin eval) para verificarlos, y aplica reemplazos textuales. Lo no parseable
+      (p.ej. `name: /regex/`) se marca `no-verificable`.
+    - `backend/src/generators/selector.healer.js`: carga la URL del scan **en vivo**
+      (reusa `launchBrowser` + `buildContextOptions` exportado de playwright.runner +
+      `runLoginPreflight` para sesión autenticada), testea cada selector con
+      `page.locator().count()`, y para los `no-resuelto` pide al LLM
+      (`generateStructured`) un reemplazo usando un resumen del DOM actual
+      (testIds/forms/buttons/links/headings). Timeouts duros con Promise.race.
+    - Endpoint `POST /api/scripts/:scanId/heal` body `{ provider?, model?, apply?,
+      healedContent? }`. Sin apply → preview (report + healedContent). Con apply +
+      healedContent → persiste el contenido ya revisado (NO recomputa → evita gasto
+      y no-determinismo del LLM). Advisory: nunca sobreescribe sin confirmación.
+    - UI: botón "🩹 Sanar selectores" + panel de reporte en la pestaña Playwright de
+      `ScriptGenerator.jsx` (badges ok/curado/sin-fix, reemplazo + razón, Aplicar/Descartar).
+    - **Pendiente**: e2e en prod; extender a Cypress/Selenium (v2).
 13. AI exploratory testing
 14. OWASP ZAP
 15. Native iOS/Android (solo si el equipo testea apps native — Appium + BrowserStack/Sauce)
