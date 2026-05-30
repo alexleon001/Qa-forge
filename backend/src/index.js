@@ -20,8 +20,10 @@ import { attachUser } from './api/middlewares/auth.middleware.js';
 import { authRouter } from './api/routes/auth.routes.js';
 import { errorHandler, notFoundHandler } from './api/middlewares/error.middleware.js';
 import { exploreRouter } from './api/routes/explore.routes.js';
+import { flowRouter } from './api/routes/flow.routes.js';
 import { jiraRouter } from './api/routes/jira.routes.js';
 import { manualCasesRouter } from './api/routes/manualcases.routes.js';
+import { nativeRouter } from './api/routes/native.routes.js';
 import { reportRouter } from './api/routes/report.routes.js';
 import { repositoryRouter } from './api/routes/repository.routes.js';
 import { scanRouter } from './api/routes/scan.routes.js';
@@ -29,8 +31,12 @@ import { schedulesRouter } from './api/routes/schedules.routes.js';
 import { scriptsRouter } from './api/routes/scripts.routes.js';
 import { userKeysRouter } from './api/routes/userkeys.routes.js';
 import { visualRouter } from './api/routes/visual.routes.js';
+import { zapRouter } from './api/routes/zap.routes.js';
 import { startExploreWorker } from './queue/explore.queue.js';
+import { startFlowWorker } from './queue/flow.queue.js';
+import { startNativeWorker } from './queue/native.queue.js';
 import { startScanWorker } from './queue/scan.queue.js';
+import { startZapWorker } from './queue/zap.queue.js';
 import { startCronMaster } from './schedules/cron.master.js';
 import { attachSocketServer } from './sockets/scan.socket.js';
 
@@ -83,6 +89,9 @@ app.use('/api/repository', repositoryRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/integrations/jira', jiraRouter);
 app.use('/api/explore', exploreRouter);
+app.use('/api/flows', flowRouter);
+app.use('/api/native', nativeRouter);
+app.use('/api/zap', zapRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -96,6 +105,21 @@ startScanWorker().catch((err) => {
 // Worker de sesiones exploratorias (diferenciador #2). Mismo proceso por simplicidad.
 startExploreWorker().catch((err) => {
   console.error('[index] No se pudo iniciar el explore worker:', err);
+});
+
+// Worker del Flow Runner determinista. Mismo proceso por simplicidad.
+startFlowWorker().catch((err) => {
+  console.error('[index] No se pudo iniciar el flow worker:', err);
+});
+
+// Worker del Native Runner (#15, Appium). Mismo proceso por simplicidad.
+startNativeWorker().catch((err) => {
+  console.error('[index] No se pudo iniciar el native worker:', err);
+});
+
+// Worker de OWASP ZAP (#14). Mismo proceso por simplicidad.
+startZapWorker().catch((err) => {
+  console.error('[index] No se pudo iniciar el zap worker:', err);
 });
 
 // Cron master para scheduled scans (FASE 8.6). Se puede deshabilitar con

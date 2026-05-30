@@ -5,12 +5,26 @@ import { useEffect, useRef, useState } from 'react';
 
 let highlighterPromise = null;
 
+// Shiki "fine-grained": en vez de importar el bundle `shiki` completo (que arrastra
+// ~200 lenguajes + el wasm de oniguruma, emitiendo decenas de chunks), usamos
+// `shiki/core` + el engine JavaScript (sin wasm) e importamos SOLO los 3 lenguajes
+// y el theme que realmente renderizamos. Reduce drásticamente lo que Vite emite.
 async function getHighlighter() {
   if (!highlighterPromise) {
-    highlighterPromise = import('shiki').then(({ createHighlighter }) =>
-      createHighlighter({
-        themes: ['github-dark'],
-        langs: ['typescript', 'javascript', 'python'],
+    highlighterPromise = Promise.all([
+      import('shiki/core'),
+      import('shiki/engine/javascript'),
+    ]).then(([{ createHighlighterCore }, { createJavaScriptRegexEngine }]) =>
+      createHighlighterCore({
+        themes: [import('shiki/themes/github-dark.mjs')],
+        langs: [
+          import('shiki/langs/typescript.mjs'),
+          import('shiki/langs/javascript.mjs'),
+          import('shiki/langs/python.mjs'),
+        ],
+        // forgiving: ante un patrón regex que el engine JS no soporta, lo saltea
+        // en vez de tirar (evita romper el highlight de un script entero).
+        engine: createJavaScriptRegexEngine({ forgiving: true }),
       }),
     );
   }

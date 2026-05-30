@@ -28,6 +28,210 @@ model User {
   jiraConfig JiraConfig?
   jiraIssues JiraIssueLink[]
   explorations ExploratorySession[]
+  flows      Flow[]
+  scheduledFlows ScheduledFlow[]
+  nativeProviders NativeProvider[]
+  nativeFlows NativeFlow[]
+  zapConfig  ZapConfig?
+  zapScans   ZapScan[]
+}
+
+// OWASP ZAP (#14). Config del daemon ZAP del usuario (1 por usuario): URL del
+// API + apiKey cifrada AES-256-GCM (mismo SECRET_ENCRYPTION_KEY).
+model ZapConfig {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  apiUrl          String // ej. http://localhost:8080
+  encryptedApiKey String? // api key del daemon, cifrada (ZAP puede correr sin key)
+  hint            String? // primeros/últimos chars de la key, para UI
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Una corrida de ZAP sobre una URL. mode: spider | baseline | full. Las alertas
+// crudas + un resumen por riesgo se guardan en JSON. Estado reusa SCAN_STATUS.
+model ZapScan {
+  id            String    @id @default(cuid())
+  userId        String
+  url           String
+  mode          String    @default("baseline") // spider | baseline | full
+  status        String    @default("pending") // pending|running|completed|failed|cancelled
+  phase         String? // spider | passive | active | done
+  spiderProgress Int      @default(0)
+  activeProgress Int      @default(0)
+  alerts        Json? // [{ name, risk, confidence, url, description, solution, reference, cweid }]
+  summary       Json? // { byRisk: { High, Medium, Low, Informational }, total, urlsFound }
+  errorMessage  String?
+  cancelRequestedAt DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Native app testing (#15). Provider/endpoint Appium configurado por el usuario.
+// type: local (Appium propio, gratis) | browserstack | saucelabs (device cloud,
+// pago). Para cloud, username va plano + accessKey cifrado AES-256-GCM (mismo
+// SECRET_ENCRYPTION_KEY que el resto). Para local, solo appiumUrl.
+model NativeProvider {
+  id                String   @id @default(cuid())
+  userId            String
+  type              String // local | browserstack | saucelabs
+  label             String // alias humano
+  appiumUrl         String? // endpoint (local) o override del hub
+  username          String? // user del cloud (no secreto)
+  encryptedAccessKey String? // access key del cloud, cifrada
+  hint              String? // primeros/últimos chars del access key, para UI
+  region            String? // región del cloud (sauce)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nativeFlows NativeFlow[]
+
+  @@index([userId])
+}
+
+// Un flujo de testing sobre una app nativa. Paralelo a Flow pero con capabilities
+// de Appium (plataforma, device, app, automationName) y pasos con estrategia de
+// localización native. La definición se separa de cada corrida (NativeFlowRun).
+model NativeFlow {
+  id              String   @id @default(cuid())
+  userId          String
+  providerId      String
+  name            String
+  description     String?
+  platform        String   @default("android") // android | ios
+  deviceName      String // ej. "Pixel 7" / "iPhone 14"
+  platformVersion String? // ej. "13.0"
+  app             String? // bs://… | storage:… | path/URL local | appPackage (Android)
+  automationName  String? // UiAutomator2 | XCUITest (default según plataforma)
+  extraCaps       Json? // capabilities extra arbitrarias (merge sobre las base)
+  steps           Json // [{ action, strategy?, selector?, value?, description? }]
+  continueOnError Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider NativeProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  runs     NativeFlowRun[]
+
+  @@index([userId])
+  @@index([providerId])
+  @@index([createdAt])
+}
+
+// Una corrida de un NativeFlow. Mismo shape de resultados que FlowRun.
+model NativeFlowRun {
+  id                String    @id @default(cuid())
+  nativeFlowId      String
+  status            String    @default("pending") // pending|running|passed|failed|error|cancelled
+  stepResults       Json? // [{ index, action, strategy, selector, value, status, message, durationMs, screenshotB64? }]
+  summary           Json? // { total, passed, failed, skipped, durationMs }
+  sessionId         String? // sessionId de Appium (para debug / link al cloud)
+  errorMessage      String?
+  cancelRequestedAt DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+
+  nativeFlow NativeFlow @relation(fields: [nativeFlowId], references: [id], onDelete: Cascade)
+
+  @@index([nativeFlowId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+// Flow Runner determinista: un flujo e2e repetible definido por una lista
+// ordenada de pasos. A diferencia de ExploratorySession (agente con LLM, no
+// determinista), un Flow ejecuta exactamente los pasos definidos y produce
+// pass/fail por paso. La definición (Flow) se separa de cada ejecución (FlowRun)
+// para que el mismo flujo se pueda correr muchas veces y comparar resultados.
+model Flow {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  description     String?
+  url             String // URL inicial del flujo
+  deviceProfile   String   @default("desktop")
+  browserEngine   String   @default("chromium")
+  loginConfig     Json? // login pre-flight opcional (mismo formato cifrado que Scan.loginConfig)
+  steps           Json // [{ action, selector?, value?, description? }]
+  continueOnError Boolean  @default(false) // si false, corta en el primer fallo
+  source          String   @default("manual") // manual | script | exploratory
+  sutId           String? // link opcional a un SUT del repositorio (solo referencia)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs      FlowRun[]
+  schedules ScheduledFlow[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+// Una ejecución de un Flow. `stepResults` guarda el detalle por paso (status,
+// mensaje, duración, screenshot en base64 en caso de fallo). `signals` (v2)
+// acumula errores de consola JS + HTTP capturados durante la corrida.
+model FlowRun {
+  id                String    @id @default(cuid())
+  flowId            String
+  status            String    @default("pending") // pending|running|passed|failed|error|cancelled
+  stepResults       Json? // [{ index, action, selector, value, status, message, durationMs, screenshotB64? }]
+  summary           Json? // { total, passed, failed, skipped, durationMs, consoleErrors, httpErrors }
+  signals           Json? // { consoleErrors: [{message}], httpErrors: [{status,url}] }  (v2)
+  scheduledFlowId   String? // si lo disparó un ScheduledFlow (v2)
+  errorMessage      String?
+  cancelRequestedAt DateTime?
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime  @default(now())
+
+  flow Flow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([flowId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([scheduledFlowId])
+}
+
+// v2: programación de flows via cron. Reusa el cron.master (mismo tick que
+// ScheduledScan) y el notifier. Notifica por webhook/email según notifyOn.
+model ScheduledFlow {
+  id            String    @id @default(cuid())
+  userId        String
+  flowId        String
+  name          String // alias humano del schedule
+  cron          String // expresión cron (5 o 6 campos)
+  timezone      String    @default("UTC")
+  enabled       Boolean   @default(true)
+
+  // Notificaciones
+  notifyWebhook String? // Slack/Discord webhook URL
+  notifyEmail   String? // destinatario; requiere SMTP_* en .env
+  notifyOn      String    @default("onFailOnly") // always | onFailOnly
+
+  // Estado
+  lastRunAt     DateTime?
+  nextRunAt     DateTime?
+  lastRunId     String? // último FlowRun creado por este schedule
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  flow Flow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([enabled, nextRunAt])
 }
 
 // AI exploratory testing: un agente de IA maneja un browser Playwright de forma

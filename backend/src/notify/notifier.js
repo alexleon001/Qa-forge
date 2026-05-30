@@ -51,6 +51,56 @@ export async function notifyScanComplete({ schedule, scan, summary, errorMessage
   }
 }
 
+/**
+ * Notifica una corrida de Flow disparada por un ScheduledFlow (v2). Reusa los
+ * canales webhook/email. notifyOn de flows: always | onFailOnly. Safe-call.
+ */
+export async function notifyFlowRunComplete({ schedule, flow, run }) {
+  try {
+    const failed = run.status === 'failed' || run.status === 'error';
+    if (schedule.notifyOn === 'onFailOnly' && !failed) {
+      return { skipped: true, reason: 'no cumple notifyOn (solo fallos)' };
+    }
+    const payload = buildFlowPayload({ schedule, flow, run });
+    const results = await Promise.allSettled([
+      schedule.notifyWebhook ? sendWebhook(schedule.notifyWebhook, payload) : null,
+      schedule.notifyEmail ? sendEmail(schedule.notifyEmail, payload) : null,
+    ]);
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        console.error('[notifier] canal de flow falló:', r.reason?.message ?? r.reason);
+      }
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error('[notifier] error inesperado (flow):', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+function buildFlowPayload({ schedule, flow, run }) {
+  const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_URL?.split(',')[0]?.trim() || '';
+  const runUrl = baseUrl ? `${baseUrl}/flows/runs/${run.id}` : null;
+  const s = run.summary ?? {};
+  const passedAll = run.status === 'passed';
+  const emoji = passedAll ? '✅' : run.status === 'error' ? '🔥' : '❌';
+  const title = `${emoji} QA Forge Flow — ${schedule.name}`;
+  const summaryLine = run.errorMessage
+    ? `Flow ${run.status.toUpperCase()}: ${truncate(run.errorMessage, 200)}`
+    : `${s.passed ?? 0}/${s.total ?? 0} pasos ok${s.failed ? ` · ${s.failed} fallaron` : ''}${
+        s.consoleErrors ? ` · ${s.consoleErrors} errores consola` : ''
+      }`;
+  return {
+    title,
+    summaryLine,
+    reportUrl: runUrl,
+    schedule: { id: schedule.id, name: schedule.name, cron: schedule.cron, url: flow?.url ?? '' },
+    scan: { id: run.id, url: flow?.url ?? '', status: run.status, completedAt: run.completedAt },
+    summary: null, // los flows no tienen byCategory; el webhook usa summaryLine
+    errorMessage: run.errorMessage ?? null,
+  };
+}
+
 function buildPayload({ schedule, scan, summary, errorMessage }) {
   const baseUrl = process.env.PUBLIC_FRONTEND_URL || process.env.FRONTEND_URL?.split(',')[0]?.trim() || '';
   const reportUrl = baseUrl ? `${baseUrl}/scan/${scan.id}/report` : null;

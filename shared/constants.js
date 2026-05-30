@@ -97,6 +97,26 @@ export const SOCKET_EVENT = Object.freeze({
   EXPLORE_FINDING: 'explore:finding',
   EXPLORE_COMPLETED: 'explore:completed',
   EXPLORE_FAILED: 'explore:failed',
+  // Flow Runner determinista (corrida de un flujo, room `flow:<runId>`).
+  FLOW_SUBSCRIBE: 'flow:subscribe',
+  FLOW_UNSUBSCRIBE: 'flow:unsubscribe',
+  FLOW_PROGRESS: 'flow:progress',
+  FLOW_STEP: 'flow:step',
+  FLOW_COMPLETED: 'flow:completed',
+  FLOW_FAILED: 'flow:failed',
+  // Native app testing (#15) — corrida de un flujo native, room `native:<runId>`.
+  NATIVE_SUBSCRIBE: 'native:subscribe',
+  NATIVE_UNSUBSCRIBE: 'native:unsubscribe',
+  NATIVE_PROGRESS: 'native:progress',
+  NATIVE_STEP: 'native:step',
+  NATIVE_COMPLETED: 'native:completed',
+  NATIVE_FAILED: 'native:failed',
+  // OWASP ZAP security scan (#14) — room `zap:<scanId>`.
+  ZAP_SUBSCRIBE: 'zap:subscribe',
+  ZAP_UNSUBSCRIBE: 'zap:unsubscribe',
+  ZAP_PROGRESS: 'zap:progress',
+  ZAP_COMPLETED: 'zap:completed',
+  ZAP_FAILED: 'zap:failed',
 });
 
 /** AI exploratory testing — límites y vocabularios. */
@@ -108,6 +128,189 @@ export const EXPLORE_ACTIONS = Object.freeze(['click', 'fill', 'navigate', 'back
 
 /** Severidades de un hallazgo exploratorio (orden de mayor a menor). */
 export const FINDING_SEVERITY = Object.freeze(['critical', 'high', 'medium', 'low', 'info']);
+
+// ─── Flow Runner determinista ───────────────────────────────────────────────
+// Un Flow es un flujo e2e repetible: lista ordenada de pasos { action, selector,
+// value, description }. El ejecutor (flow.runner.js) los corre en un browser real
+// y da pass/fail por paso + global. A diferencia del agente exploratorio, es
+// determinista (sin LLM): los mismos pasos producen el mismo resultado.
+
+/** Acciones soportadas en un paso de Flow. */
+export const FLOW_ACTIONS = Object.freeze({
+  GOTO: 'goto',
+  CLICK: 'click',
+  FILL: 'fill',
+  SELECT: 'select',
+  CHECK: 'check',
+  UNCHECK: 'uncheck',
+  PRESS: 'press',
+  HOVER: 'hover',
+  WAIT_FOR: 'waitFor',
+  WAIT: 'wait',
+  ASSERT_VISIBLE: 'assertVisible',
+  ASSERT_HIDDEN: 'assertHidden',
+  ASSERT_TEXT: 'assertText',
+  ASSERT_VALUE: 'assertValue',
+  ASSERT_URL: 'assertUrl',
+  ASSERT_TITLE: 'assertTitle',
+  ASSERT_NO_CONSOLE_ERRORS: 'assertNoConsoleErrors',
+  ASSERT_NO_HTTP_ERRORS: 'assertNoHttpErrors',
+});
+
+/**
+ * Metadata por acción: qué campos requiere y cómo agruparla/etiquetarla. La usan
+ * tanto el runner (validación) como el step-builder del frontend. `group`:
+ * navigation | interaction | wait | assertion.
+ */
+export const FLOW_ACTION_META = Object.freeze({
+  goto: { label: 'Ir a URL', needsSelector: false, needsValue: true, group: 'navigation', hint: 'URL o path same-origin' },
+  click: { label: 'Click', needsSelector: true, needsValue: false, group: 'interaction' },
+  fill: { label: 'Escribir texto', needsSelector: true, needsValue: true, group: 'interaction', hint: 'texto a escribir' },
+  select: { label: 'Seleccionar opción', needsSelector: true, needsValue: true, group: 'interaction', hint: 'value de la opción' },
+  check: { label: 'Marcar checkbox', needsSelector: true, needsValue: false, group: 'interaction' },
+  uncheck: { label: 'Desmarcar checkbox', needsSelector: true, needsValue: false, group: 'interaction' },
+  press: { label: 'Presionar tecla', needsSelector: false, needsValue: true, group: 'interaction', hint: 'p.ej. Enter, Escape, Tab' },
+  hover: { label: 'Hover', needsSelector: true, needsValue: false, group: 'interaction' },
+  waitFor: { label: 'Esperar elemento visible', needsSelector: true, needsValue: false, group: 'wait' },
+  wait: { label: 'Esperar (ms)', needsSelector: false, needsValue: true, group: 'wait', hint: 'milisegundos' },
+  assertVisible: { label: 'Verificar visible', needsSelector: true, needsValue: false, group: 'assertion' },
+  assertHidden: { label: 'Verificar oculto/ausente', needsSelector: true, needsValue: false, group: 'assertion' },
+  assertText: { label: 'Verificar texto contiene', needsSelector: true, needsValue: true, group: 'assertion', hint: 'texto esperado' },
+  assertValue: { label: 'Verificar value del input', needsSelector: true, needsValue: true, group: 'assertion', hint: 'value esperado' },
+  assertUrl: { label: 'Verificar URL contiene', needsSelector: false, needsValue: true, group: 'assertion', hint: 'fragmento de URL' },
+  assertTitle: { label: 'Verificar título contiene', needsSelector: false, needsValue: true, group: 'assertion', hint: 'fragmento del <title>' },
+  assertNoConsoleErrors: { label: 'Sin errores de consola JS', needsSelector: false, needsValue: false, group: 'assertion' },
+  assertNoHttpErrors: { label: 'Sin errores HTTP (4xx/5xx)', needsSelector: false, needsValue: false, group: 'assertion' },
+});
+
+/** Origen de un Flow. */
+export const FLOW_SOURCE = Object.freeze({
+  MANUAL: 'manual', // creado a mano en el editor
+  SCRIPT: 'script', // importado de un script generado (v2)
+  EXPLORATORY: 'exploratory', // derivado de una sesión exploratoria (v2)
+});
+
+/** Estado de una corrida de Flow (FlowRun). */
+export const FLOW_RUN_STATUS = Object.freeze({
+  PENDING: 'pending',
+  RUNNING: 'running',
+  PASSED: 'passed', // todos los pasos pasaron
+  FAILED: 'failed', // al menos un paso falló (aserción o acción)
+  ERROR: 'error', // error de setup (browser/login) — no llegó a correr pasos
+  CANCELLED: 'cancelled',
+});
+
+/** Estado de un paso individual dentro de una corrida. */
+export const FLOW_STEP_STATUS = Object.freeze({
+  PENDING: 'pending',
+  RUNNING: 'running',
+  PASSED: 'passed',
+  FAILED: 'failed',
+  SKIPPED: 'skipped', // no ejecutado (un paso previo falló y continueOnError=false)
+});
+
+/** Tope de pasos por flow + timeout duro por paso. */
+export const MAX_FLOW_STEPS = 60;
+export const FLOW_STEP_TIMEOUT_MS = 10_000;
+export const MAX_FLOW_WAIT_MS = 30_000;
+
+/** Nombre de la queue de BullMQ para corridas de flow (no admite `:`). */
+export const FLOW_QUEUE_NAME = 'qa-forge-flow';
+
+/** Modos de notificación para flows programados (v2). Más simple que el de scans. */
+export const FLOW_NOTIFY_ON = Object.freeze(['always', 'onFailOnly']);
+
+// ─── Native app testing (#15) ───────────────────────────────────────────────
+// Testing de apps nativas iOS/Android vía Appium (protocolo W3C WebDriver sobre
+// HTTP). Provider-agnóstico: el mismo runner habla con Appium local (gratis),
+// BrowserStack App Automate o Sauce Labs (pagos) — solo cambia el endpoint + auth.
+// Reusa FLOW_RUN_STATUS / FLOW_STEP_STATUS para el estado de corridas y pasos.
+
+/** Plataformas soportadas (Appium `platformName`). */
+export const NATIVE_PLATFORMS = Object.freeze({
+  android: { id: 'android', label: 'Android', platformName: 'Android', defaultAutomation: 'UiAutomator2', icon: '🤖' },
+  ios: { id: 'ios', label: 'iOS', platformName: 'iOS', defaultAutomation: 'XCUITest', icon: '🍎' },
+});
+export const DEFAULT_NATIVE_PLATFORM = 'android';
+
+/** Tipos de provider/endpoint Appium. */
+export const NATIVE_PROVIDER_TYPES = Object.freeze({
+  local: { id: 'local', label: 'Appium local', paid: false, defaultUrl: 'http://localhost:4723' },
+  browserstack: { id: 'browserstack', label: 'BrowserStack App Automate', paid: true, defaultUrl: 'https://hub-cloud.browserstack.com/wd/hub' },
+  saucelabs: { id: 'saucelabs', label: 'Sauce Labs', paid: true, defaultUrl: 'https://ondemand.us-west-1.saucelabs.com/wd/hub' },
+});
+
+/** Estrategias de localización de Appium (el `using` del W3C find element). */
+export const NATIVE_LOCATOR_STRATEGIES = Object.freeze([
+  { id: 'accessibility id', label: 'Accessibility ID', platforms: ['android', 'ios'] },
+  { id: 'id', label: 'ID (resource-id / name)', platforms: ['android', 'ios'] },
+  { id: 'xpath', label: 'XPath', platforms: ['android', 'ios'] },
+  { id: 'class name', label: 'Class name', platforms: ['android', 'ios'] },
+  { id: '-android uiautomator', label: 'Android UiAutomator', platforms: ['android'] },
+  { id: '-ios predicate string', label: 'iOS Predicate String', platforms: ['ios'] },
+  { id: '-ios class chain', label: 'iOS Class Chain', platforms: ['ios'] },
+]);
+export const DEFAULT_NATIVE_STRATEGY = 'accessibility id';
+
+/** Acciones de un paso native. */
+export const NATIVE_ACTIONS = Object.freeze({
+  TAP: 'tap',
+  TYPE: 'type',
+  CLEAR: 'clear',
+  PRESS_KEY: 'pressKey',
+  SWIPE: 'swipe',
+  WAIT: 'wait',
+  WAIT_FOR: 'waitFor',
+  BACK: 'back',
+  ASSERT_VISIBLE: 'assertVisible',
+  ASSERT_NOT_VISIBLE: 'assertNotVisible',
+  ASSERT_TEXT: 'assertText',
+});
+
+/** Metadata por acción native (requiere selector/valor + grupo, para UI + validación). */
+export const NATIVE_ACTION_META = Object.freeze({
+  tap: { label: 'Tap', needsSelector: true, needsValue: false, group: 'interaction' },
+  type: { label: 'Escribir texto', needsSelector: true, needsValue: true, group: 'interaction', hint: 'texto a escribir' },
+  clear: { label: 'Limpiar campo', needsSelector: true, needsValue: false, group: 'interaction' },
+  pressKey: { label: 'Tecla / keycode', needsSelector: false, needsValue: true, group: 'interaction', hint: 'home | back | enter | <keycode Android>' },
+  swipe: { label: 'Swipe', needsSelector: false, needsValue: true, group: 'interaction', hint: 'up | down | left | right' },
+  wait: { label: 'Esperar (ms)', needsSelector: false, needsValue: true, group: 'wait', hint: 'milisegundos' },
+  waitFor: { label: 'Esperar elemento', needsSelector: true, needsValue: false, group: 'wait' },
+  back: { label: 'Botón atrás', needsSelector: false, needsValue: false, group: 'interaction' },
+  assertVisible: { label: 'Verificar visible', needsSelector: true, needsValue: false, group: 'assertion' },
+  assertNotVisible: { label: 'Verificar ausente', needsSelector: true, needsValue: false, group: 'assertion' },
+  assertText: { label: 'Verificar texto contiene', needsSelector: true, needsValue: true, group: 'assertion', hint: 'texto esperado' },
+});
+
+export const MAX_NATIVE_STEPS = 60;
+export const NATIVE_STEP_TIMEOUT_MS = 15_000;
+export const NATIVE_QUEUE_NAME = 'qa-forge-native';
+
+// ─── OWASP ZAP security scan (#14) ──────────────────────────────────────────
+// Integración con OWASP ZAP (Zed Attack Proxy) corriendo como daemon con API
+// REST. QA Forge actúa de cliente: dispara spider + passive + (opcional) active
+// scan sobre una URL y trae las alertas agrupadas por riesgo. El daemon ZAP es
+// un endpoint externo (local `zap.sh -daemon` o Docker `zaproxy/zap-stable`),
+// igual que Appium en el native testing.
+
+/**
+ * Modos de scan ZAP, de menos a más intrusivo:
+ *  - spider: solo crawl (descubre URLs). Rápido, no ataca.
+ *  - baseline: spider + passive scan (analiza respuestas, NO envía ataques). Seguro.
+ *  - full: spider + passive + ACTIVE scan (envía payloads de ataque). INTRUSIVO:
+ *    solo sobre sitios propios/autorizados.
+ */
+export const ZAP_SCAN_MODES = Object.freeze({
+  spider: { id: 'spider', label: 'Spider (solo crawl)', intrusive: false, active: false },
+  baseline: { id: 'baseline', label: 'Baseline (spider + passivo)', intrusive: false, active: false },
+  full: { id: 'full', label: 'Full (spider + passivo + activo)', intrusive: true, active: true },
+});
+export const DEFAULT_ZAP_SCAN_MODE = 'baseline';
+
+/** Niveles de riesgo de ZAP (de mayor a menor), tal como los nombra su API. */
+export const ZAP_RISK_LEVELS = Object.freeze(['High', 'Medium', 'Low', 'Informational']);
+
+export const ZAP_QUEUE_NAME = 'qa-forge-zap';
 
 /** Nombre de la queue de BullMQ (no admite `:` en el nombre). */
 export const QUEUE_NAME = 'qa-forge-scan';
