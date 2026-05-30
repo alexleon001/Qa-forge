@@ -351,6 +351,210 @@ export async function deleteExploration(id) {
   await api.delete(`/api/explore/${id}`);
 }
 
+// ─── Flow Runner determinista ───────────────────────────────────────────────
+
+/** Crea un flujo. Devuelve { flow }. */
+export async function createFlow(payload) {
+  const { data } = await api.post('/api/flows', payload);
+  return data.flow;
+}
+
+/** Lista flujos paginados. Devuelve { flows, pagination }. */
+export async function listFlows({ page, pageSize } = {}) {
+  const { data } = await api.get('/api/flows', { params: { page, pageSize } });
+  return data;
+}
+
+/** Devuelve { flow, runs } (últimas corridas). */
+export async function getFlow(id) {
+  const { data } = await api.get(`/api/flows/${id}`);
+  return data;
+}
+
+export async function updateFlow(id, patch) {
+  const { data } = await api.put(`/api/flows/${id}`, patch);
+  return data.flow;
+}
+
+export async function deleteFlow(id) {
+  await api.delete(`/api/flows/${id}`);
+}
+
+/** Lanza una corrida del flujo. Devuelve { run }. */
+export async function runFlow(id) {
+  const { data } = await api.post(`/api/flows/${id}/run`);
+  return data.run;
+}
+
+export async function listFlowRuns(id) {
+  const { data } = await api.get(`/api/flows/${id}/runs`);
+  return data.runs;
+}
+
+/** Detalle de una corrida (incluye stepResults). Devuelve { run }. */
+export async function getFlowRun(runId) {
+  const { data } = await api.get(`/api/flows/runs/${runId}`);
+  return data.run;
+}
+
+export async function cancelFlowRun(runId) {
+  const { data } = await api.post(`/api/flows/runs/${runId}/cancel`);
+  return data;
+}
+
+// Flow Runner v2 ──────────────────────────────────────────────────────────
+
+/** Exporta el flow a un framework. Devuelve { content, filename, language, framework }. */
+export async function exportFlowScript(id, framework) {
+  const { data } = await api.get(`/api/flows/${id}/export`, { params: { framework } });
+  return data;
+}
+
+/** Crea un flow borrador desde una sesión exploratoria. Devuelve el flow. */
+export async function createFlowFromExploration(sessionId) {
+  const { data } = await api.post(`/api/flows/from-exploration/${sessionId}`);
+  return data.flow;
+}
+
+export async function listFlowSchedules() {
+  const { data } = await api.get('/api/flows/schedules');
+  return data.schedules;
+}
+
+export async function createFlowSchedule(payload) {
+  const { data } = await api.post('/api/flows/schedules', payload);
+  return data.schedule;
+}
+
+export async function updateFlowSchedule(scheduleId, patch) {
+  const { data } = await api.patch(`/api/flows/schedules/${scheduleId}`, patch);
+  return data.schedule;
+}
+
+export async function deleteFlowSchedule(scheduleId) {
+  await api.delete(`/api/flows/schedules/${scheduleId}`);
+}
+
+export async function runFlowScheduleNow(scheduleId) {
+  const { data } = await api.post(`/api/flows/schedules/${scheduleId}/run`);
+  return data.run;
+}
+
+// ─── Native app testing (#15) ───────────────────────────────────────────────
+
+export async function listNativeProviders() {
+  const { data } = await api.get('/api/native/providers');
+  return data.providers;
+}
+
+export async function createNativeProvider(payload) {
+  const { data } = await api.post('/api/native/providers', payload);
+  return data.provider;
+}
+
+export async function updateNativeProvider(id, patch) {
+  const { data } = await api.patch(`/api/native/providers/${id}`, patch);
+  return data.provider;
+}
+
+export async function deleteNativeProvider(id) {
+  await api.delete(`/api/native/providers/${id}`);
+}
+
+/** Test de conectividad del endpoint Appium. Devuelve { ok, status }. */
+export async function testNativeProvider(id) {
+  const { data } = await api.post(`/api/native/providers/${id}/test`);
+  return data;
+}
+
+export async function listNativeFlows() {
+  const { data } = await api.get('/api/native/flows');
+  return data.flows;
+}
+
+export async function createNativeFlow(payload) {
+  const { data } = await api.post('/api/native/flows', payload);
+  return data.flow;
+}
+
+/** Devuelve { flow, runs }. */
+export async function getNativeFlow(id) {
+  const { data } = await api.get(`/api/native/flows/${id}`);
+  return data;
+}
+
+export async function updateNativeFlow(id, patch) {
+  const { data } = await api.put(`/api/native/flows/${id}`, patch);
+  return data.flow;
+}
+
+export async function deleteNativeFlow(id) {
+  await api.delete(`/api/native/flows/${id}`);
+}
+
+/** Lanza una corrida native. Devuelve { run }. */
+export async function runNativeFlow(id) {
+  const { data } = await api.post(`/api/native/flows/${id}/run`);
+  return data.run;
+}
+
+/** Detalle de una corrida native (incluye stepResults). Devuelve el run. */
+export async function getNativeFlowRun(runId) {
+  const { data } = await api.get(`/api/native/runs/${runId}`);
+  return data.run;
+}
+
+export async function cancelNativeFlowRun(runId) {
+  const { data } = await api.post(`/api/native/runs/${runId}/cancel`);
+  return data;
+}
+
+// ─── OWASP ZAP (#14) ────────────────────────────────────────────────────────
+
+export async function getZapConfig() {
+  const { data } = await api.get('/api/zap/config');
+  return data; // { configured, config }
+}
+
+export async function saveZapConfig(payload) {
+  const { data } = await api.put('/api/zap/config', payload);
+  return data.config;
+}
+
+export async function deleteZapConfig() {
+  await api.delete('/api/zap/config');
+}
+
+/** Test de conectividad del daemon ZAP. Devuelve { ok, version }. */
+export async function testZapConfig(payload) {
+  const { data } = await api.post('/api/zap/config/test', payload ?? {});
+  return data;
+}
+
+export async function listZapScans() {
+  const { data } = await api.get('/api/zap/scans');
+  return data.scans;
+}
+
+export async function createZapScan(payload) {
+  const { data } = await api.post('/api/zap/scans', payload);
+  return data.scan;
+}
+
+export async function getZapScan(id) {
+  const { data } = await api.get(`/api/zap/scans/${id}`);
+  return data.scan;
+}
+
+export async function cancelZapScan(id) {
+  const { data } = await api.post(`/api/zap/scans/${id}/cancel`);
+  return data;
+}
+
+export async function deleteZapScan(id) {
+  await api.delete(`/api/zap/scans/${id}`);
+}
+
 // ─── Scheduled scans (FASE 8.6) ─────────────────────────────────────────
 
 export async function listSchedules() {

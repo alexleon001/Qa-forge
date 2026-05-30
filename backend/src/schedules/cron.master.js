@@ -9,8 +9,9 @@
 import { CronExpressionParser } from 'cron-parser';
 
 import { prisma } from '../db/client.js';
+import { enqueueFlowRun } from '../queue/flow.queue.js';
 import { enqueueScan } from '../queue/scan.queue.js';
-import { SCAN_STATUS } from '../../../shared/constants.js';
+import { FLOW_RUN_STATUS, SCAN_STATUS } from '../../../shared/constants.js';
 
 const TICK_INTERVAL_MS = 60_000;
 const ENABLE_FLAG = process.env.ENABLE_SCHEDULER !== 'false';
@@ -40,28 +41,35 @@ export function stopCronMaster() {
 }
 
 async function bootstrapNextRunTimes() {
-  const orphan = await prisma.scheduledScan.findMany({
+  await bootstrapModel(prisma.scheduledScan, 'scan');
+  await bootstrapModel(prisma.scheduledFlow, 'flow');
+}
+
+async function bootstrapModel(model, kind) {
+  const orphan = await model.findMany({
     where: { enabled: true, nextRunAt: null },
     select: { id: true, cron: true, timezone: true },
   });
   for (const s of orphan) {
     try {
       const next = computeNextRunAt(s.cron, s.timezone, new Date());
-      await prisma.scheduledScan.update({
-        where: { id: s.id },
-        data: { nextRunAt: next },
-      });
+      await model.update({ where: { id: s.id }, data: { nextRunAt: next } });
     } catch (err) {
-      console.error(`[cron.master] schedule ${s.id} expresión inválida:`, err.message);
+      console.error(`[cron.master] ${kind} schedule ${s.id} expresión inválida:`, err.message);
     }
   }
 }
 
 async function runTick() {
   const now = new Date();
+  await tickModel(prisma.scheduledScan, fireSchedule, now);
+  await tickModel(prisma.scheduledFlow, fireFlowSchedule, now);
+}
+
+async function tickModel(model, fire, now) {
   let due;
   try {
-    due = await prisma.scheduledScan.findMany({
+    due = await model.findMany({
       where: {
         enabled: true,
         OR: [{ nextRunAt: null }, { nextRunAt: { lte: now } }],
@@ -75,16 +83,13 @@ async function runTick() {
 
   for (const s of due) {
     try {
-      await fireSchedule(s);
+      await fire(s);
     } catch (err) {
       console.error(`[cron.master] schedule ${s.id} falló:`, err.message);
-      // Aún así actualizamos nextRunAt para no quedarnos atascados
+      // Aún así actualizamos nextRunAt para no quedarnos atascados.
       try {
         const next = computeNextRunAt(s.cron, s.timezone, new Date());
-        await prisma.scheduledScan.update({
-          where: { id: s.id },
-          data: { nextRunAt: next },
-        });
+        await model.update({ where: { id: s.id }, data: { nextRunAt: next } });
       } catch {}
     }
   }
@@ -128,6 +133,33 @@ async function fireSchedule(schedule) {
 
   console.log(
     `[cron.master] schedule=${schedule.id} (${schedule.name}) → scan=${scan.id}, next=${nextRun?.toISOString() ?? 'never'}`,
+  );
+}
+
+async function fireFlowSchedule(schedule) {
+  const now = new Date();
+
+  const run = await prisma.flowRun.create({
+    data: { flowId: schedule.flowId, status: FLOW_RUN_STATUS.PENDING, scheduledFlowId: schedule.id },
+    select: { id: true },
+  });
+  await enqueueFlowRun(run.id);
+
+  const nextRun = (() => {
+    try {
+      return computeNextRunAt(schedule.cron, schedule.timezone, now);
+    } catch {
+      return null;
+    }
+  })();
+
+  await prisma.scheduledFlow.update({
+    where: { id: schedule.id },
+    data: { lastRunAt: now, lastRunId: run.id, nextRunAt: nextRun },
+  });
+
+  console.log(
+    `[cron.master] flowSchedule=${schedule.id} (${schedule.name}) → flowRun=${run.id}, next=${nextRun?.toISOString() ?? 'never'}`,
   );
 }
 

@@ -4,9 +4,15 @@
 // repositorio de casos (FASE 10).
 
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 
-import { applyTestCaseActions, cancelExploration, getExploration, listSuts } from '../lib/api.js';
+import {
+  applyTestCaseActions,
+  cancelExploration,
+  createFlowFromExploration,
+  getExploration,
+  listSuts,
+} from '../lib/api.js';
 import { getSocket } from '../lib/socket.js';
 
 const SEVERITY_STYLE = {
@@ -21,12 +27,14 @@ const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 
 export function ExploreSession() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [session, setSession] = useState(null);
   const [steps, setSteps] = useState([]);
   const [findings, setFindings] = useState([]);
   const [status, setStatus] = useState('pending');
   const [progress, setProgress] = useState(null);
   const [error, setError] = useState(null);
+  const [converting, setConverting] = useState(false);
   const trailEndRef = useRef(null);
 
   // Carga inicial + (re)hidratación de una sesión ya terminada.
@@ -111,7 +119,19 @@ export function ExploreSession() {
     }
   };
 
+  const handleConvertToFlow = async () => {
+    setConverting(true);
+    try {
+      const flow = await createFlowFromExploration(id);
+      navigate(`/flows/${flow.id}`);
+    } catch (err) {
+      setError(err?.response?.data?.message ?? err?.message ?? 'No se pudo convertir a flujo');
+      setConverting(false);
+    }
+  };
+
   const running = status === 'running' || status === 'pending';
+  const canConvert = !running && steps.some((s) => ['click', 'fill', 'navigate'].includes(s.action) && !s.blocked);
 
   if (error && !session) {
     return <section className="mx-auto max-w-4xl px-6 py-10 text-sm text-red-300">{error}</section>;
@@ -131,15 +151,28 @@ export function ExploreSession() {
           </p>
           {progress?.message ? <p className="mt-1 text-xs text-amber-300/80">{progress.message}</p> : null}
         </div>
-        {running ? (
-          <button
-            type="button"
-            onClick={handleCancel}
-            className="rounded-md border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
-          >
-            Cancelar
-          </button>
-        ) : null}
+        <div className="flex gap-2">
+          {canConvert ? (
+            <button
+              type="button"
+              disabled={converting}
+              onClick={handleConvertToFlow}
+              title="Genera un flujo determinista borrador con los pasos del trail (selectores heurísticos, editables)"
+              className="rounded-md border border-emerald-500/50 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-60"
+            >
+              {converting ? '…' : '🎬 Convertir a flujo'}
+            </button>
+          ) : null}
+          {running ? (
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="rounded-md border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+            >
+              Cancelar
+            </button>
+          ) : null}
+        </div>
       </header>
 
       {error ? (

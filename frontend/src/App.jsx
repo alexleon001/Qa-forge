@@ -7,9 +7,16 @@ import { Compare } from './views/Compare.jsx';
 import { Dashboard } from './views/Dashboard.jsx';
 import { Explore } from './views/Explore.jsx';
 import { ExploreSession } from './views/ExploreSession.jsx';
+import { FlowEditor } from './views/FlowEditor.jsx';
+import { FlowRunView } from './views/FlowRunView.jsx';
+import { Flows } from './views/Flows.jsx';
 import { History } from './views/History.jsx';
 import { Home } from './views/Home.jsx';
 import { JiraSettings } from './views/JiraSettings.jsx';
+import { NativeFlowEditor } from './views/NativeFlowEditor.jsx';
+import { NativeFlows } from './views/NativeFlows.jsx';
+import { NativeProviders } from './views/NativeProviders.jsx';
+import { NativeRunView } from './views/NativeRunView.jsx';
 import { Login } from './views/Login.jsx';
 import { ManualCases } from './views/ManualCases.jsx';
 import { Register } from './views/Register.jsx';
@@ -19,6 +26,8 @@ import { RequireAuth } from './components/RequireAuth.jsx';
 import { Schedules } from './views/Schedules.jsx';
 import { ScriptGenerator } from './views/ScriptGenerator.jsx';
 import { SutDetail } from './views/SutDetail.jsx';
+import { ZapScanDetail } from './views/ZapScanDetail.jsx';
+import { ZapSecurity } from './views/ZapSecurity.jsx';
 import { useAuthStore } from './store/auth.store.js';
 
 export function App() {
@@ -154,6 +163,94 @@ export function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/flows"
+            element={
+              <RequireAuth>
+                <Flows />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/flows/new"
+            element={
+              <RequireAuth>
+                <FlowEditor />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/flows/runs/:runId"
+            element={
+              <RequireAuth>
+                <FlowRunView />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/flows/:id"
+            element={
+              <RequireAuth>
+                <FlowEditor />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/native"
+            element={
+              <RequireAuth>
+                <NativeFlows />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/native/new"
+            element={
+              <RequireAuth>
+                <NativeFlowEditor />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/native/runs/:runId"
+            element={
+              <RequireAuth>
+                <NativeRunView />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/native/:id"
+            element={
+              <RequireAuth>
+                <NativeFlowEditor />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/settings/native"
+            element={
+              <RequireAuth>
+                <NativeProviders />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/security"
+            element={
+              <RequireAuth>
+                <ZapSecurity />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/security/:id"
+            element={
+              <RequireAuth>
+                <ZapScanDetail />
+              </RequireAuth>
+            }
+          />
         </Routes>
       </main>
 
@@ -193,6 +290,12 @@ function NavBar() {
       <Link to="/repository" className="hover:text-slate-100">Repositorio</Link>
       <span className="opacity-30">·</span>
       <Link to="/explore" className="hover:text-slate-100">Explorar</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/flows" className="hover:text-slate-100">Flujos</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/native" className="hover:text-slate-100">Native</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/security" className="hover:text-slate-100">Security</Link>
       <span className="opacity-30">·</span>
       <Link to="/schedules" className="hover:text-slate-100">Schedules</Link>
       <span className="opacity-30">·</span>
