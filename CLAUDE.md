@@ -627,7 +627,22 @@ ninguna de esas cosas, por eso el split.
     - UI: botón "🩹 Sanar selectores" + panel de reporte en la pestaña Playwright de
       `ScriptGenerator.jsx` (badges ok/curado/sin-fix, reemplazo + razón, Aplicar/Descartar).
     - **Pendiente**: e2e en prod; extender a Cypress/Selenium (v2).
-13. AI exploratory testing
+13. ✅ **AI exploratory testing** — v1 implementada 2026-05-29 (agente DOM-texto, sesión independiente).
+    - Un agente de IA maneja un browser Playwright autónomo: observa los elementos
+      interactivos visibles, decide la acción (click/fill/navigate/back/finish) vía
+      `generateStructured`, la ejecuta de forma segura y acumula errores de consola/HTTP.
+      Pasada final del LLM consolida hallazgos. Provider-agnóstico (texto por paso).
+    - Modelo `ExploratorySession` (independiente, NO ligado a Scan). Queue propia
+      `qa-forge-explore` (`backend/src/queue/explore.queue.js`, con `ExploreContext`
+      de cancelación calcado de `ScanContext`). Agente en `backend/src/agents/explore.agent.js`.
+      Rutas `/api/explore` (CRUD + cancel, `requireAuth`). Eventos socket `explore:*`.
+    - Guardrails: same-origin duro (vuelve atrás si se va), system prompt prohíbe acciones
+      destructivas (logout/borrar/pagar), acotado por `maxSteps` (default 15, cap 40),
+      timeouts duros, acción por índice taggeado (`data-qaforge-idx`, sin eval).
+    - UI: vista `/explore` (form + lista) + `/explore/:id` (trail + hallazgos en vivo por
+      socket). Cada hallazgo se puede **mandar al repositorio** (crea TestCase, reusa
+      `applyTestCaseActions`). Sin Jira en v1.
+    - **Pendiente**: e2e en prod; percepción con visión/screenshots (v2).
 14. OWASP ZAP
 15. Native iOS/Android (solo si el equipo testea apps native — Appium + BrowserStack/Sauce)
 

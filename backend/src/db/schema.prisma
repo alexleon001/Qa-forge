@@ -27,6 +27,41 @@ model User {
   schedules ScheduledScan[]
   jiraConfig JiraConfig?
   jiraIssues JiraIssueLink[]
+  explorations ExploratorySession[]
+}
+
+// AI exploratory testing: un agente de IA maneja un browser Playwright de forma
+// autónoma (observa el DOM, decide click/fill/navegar, ejecuta) acotado por
+// maxSteps, y produce un reporte de hallazgos. Sesión independiente (no ligada a
+// un Scan). `steps`/`findings`/`summary` son JSON; loginConfig reusa el formato
+// cifrado de Scan.loginConfig.
+model ExploratorySession {
+  id            String    @id @default(cuid())
+  userId        String
+  url           String
+  deviceProfile String    @default("desktop")
+  browserEngine String    @default("chromium")
+  loginConfig   Json? // { url, selectors, username, encryptedPassword, ... }
+  maxSteps      Int       @default(15)
+  goal          String? // objetivo opcional en lenguaje natural
+  status        String    @default("pending") // pending | running | completed | failed | cancelled
+  currentStep   Int       @default(0)
+  provider      String? // provider de IA usado
+  model         String? // modelo usado
+  steps         Json? // [{ n, action, targetDesc, reasoning, url, newErrors }]
+  findings      Json? // [{ id, severity, title, description, category, evidence }]
+  summary       Json? // { stepsTaken, findingsBySeverity, pagesVisited }
+  errorMessage  String?
+  cancelRequestedAt DateTime?
+  createdAt     DateTime  @default(now())
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
 }
 
 // FASE 8.10: integración con Jira. Una config por usuario (Jira Cloud:

@@ -5,6 +5,8 @@ import { Link, Route, Routes, useNavigate } from 'react-router-dom';
 import { ApiKeys } from './views/ApiKeys.jsx';
 import { Compare } from './views/Compare.jsx';
 import { Dashboard } from './views/Dashboard.jsx';
+import { Explore } from './views/Explore.jsx';
+import { ExploreSession } from './views/ExploreSession.jsx';
 import { History } from './views/History.jsx';
 import { Home } from './views/Home.jsx';
 import { JiraSettings } from './views/JiraSettings.jsx';
@@ -136,6 +138,22 @@ export function App() {
               </RequireAuth>
             }
           />
+          <Route
+            path="/explore"
+            element={
+              <RequireAuth>
+                <Explore />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/explore/:id"
+            element={
+              <RequireAuth>
+                <ExploreSession />
+              </RequireAuth>
+            }
+          />
         </Routes>
       </main>
 
@@ -173,6 +191,8 @@ function NavBar() {
       <Link to="/history" className="hover:text-slate-100">History</Link>
       <span className="opacity-30">·</span>
       <Link to="/repository" className="hover:text-slate-100">Repositorio</Link>
+      <span className="opacity-30">·</span>
+      <Link to="/explore" className="hover:text-slate-100">Explorar</Link>
       <span className="opacity-30">·</span>
       <Link to="/schedules" className="hover:text-slate-100">Schedules</Link>
       <span className="opacity-30">·</span>

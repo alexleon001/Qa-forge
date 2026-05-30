@@ -323,6 +323,34 @@ export async function importRepoCasesToRunner(scanId, caseIds) {
   return data;
 }
 
+// ─── AI exploratory testing ─────────────────────────────────────────────
+
+/** Crea + encola una sesión exploratoria. Devuelve { session }. */
+export async function createExploration(payload) {
+  const { data } = await api.post('/api/explore', payload);
+  return data.session;
+}
+
+/** Lista las sesiones del user (paginado). Devuelve { sessions, pagination }. */
+export async function listExplorations({ page, pageSize } = {}) {
+  const { data } = await api.get('/api/explore', { params: { page, pageSize } });
+  return data;
+}
+
+export async function getExploration(id) {
+  const { data } = await api.get(`/api/explore/${id}`);
+  return data.session;
+}
+
+export async function cancelExploration(id) {
+  const { data } = await api.post(`/api/explore/${id}/cancel`);
+  return data;
+}
+
+export async function deleteExploration(id) {
+  await api.delete(`/api/explore/${id}`);
+}
+
 // ─── Scheduled scans (FASE 8.6) ─────────────────────────────────────────
 
 export async function listSchedules() {

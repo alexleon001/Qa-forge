@@ -19,6 +19,7 @@ process.on('unhandledRejection', (reason) => {
 import { attachUser } from './api/middlewares/auth.middleware.js';
 import { authRouter } from './api/routes/auth.routes.js';
 import { errorHandler, notFoundHandler } from './api/middlewares/error.middleware.js';
+import { exploreRouter } from './api/routes/explore.routes.js';
 import { jiraRouter } from './api/routes/jira.routes.js';
 import { manualCasesRouter } from './api/routes/manualcases.routes.js';
 import { reportRouter } from './api/routes/report.routes.js';
@@ -28,6 +29,7 @@ import { schedulesRouter } from './api/routes/schedules.routes.js';
 import { scriptsRouter } from './api/routes/scripts.routes.js';
 import { userKeysRouter } from './api/routes/userkeys.routes.js';
 import { visualRouter } from './api/routes/visual.routes.js';
+import { startExploreWorker } from './queue/explore.queue.js';
 import { startScanWorker } from './queue/scan.queue.js';
 import { startCronMaster } from './schedules/cron.master.js';
 import { attachSocketServer } from './sockets/scan.socket.js';
@@ -80,6 +82,7 @@ app.use('/api/manual-cases', manualCasesRouter);
 app.use('/api/repository', repositoryRouter);
 app.use('/api/schedules', schedulesRouter);
 app.use('/api/integrations/jira', jiraRouter);
+app.use('/api/explore', exploreRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -88,6 +91,11 @@ app.use(errorHandler);
 // conviene separarlo (otro contenedor) usando el mismo módulo.
 startScanWorker().catch((err) => {
   console.error('[index] No se pudo iniciar el scan worker:', err);
+});
+
+// Worker de sesiones exploratorias (diferenciador #2). Mismo proceso por simplicidad.
+startExploreWorker().catch((err) => {
+  console.error('[index] No se pudo iniciar el explore worker:', err);
 });
 
 // Cron master para scheduled scans (FASE 8.6). Se puede deshabilitar con
