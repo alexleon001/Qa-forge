@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 
 import { ScriptViewer } from '../components/ScriptViewer.jsx';
-import { generateScripts, getProviders, getScripts } from '../lib/api.js';
+import { generateScripts, getProviders, getScripts, healScript } from '../lib/api.js';
 
 const FRAMEWORK_LABEL = {
   playwright: 'Playwright',
@@ -25,6 +25,10 @@ export function ScriptGenerator() {
   const [usageNote, setUsageNote] = useState(null);
   const [providers, setProviders] = useState([]);
   const [selectedProvider, setSelectedProvider] = useState(null);
+  // Auto-healing de selectores (solo Playwright).
+  const [healing, setHealing] = useState(false);
+  const [healReport, setHealReport] = useState(null);
+  const [healError, setHealError] = useState(null);
 
   // Cargar scripts existentes + lista de providers configurados.
   useEffect(() => {
@@ -66,6 +70,8 @@ export function ScriptGenerator() {
     setError(null);
     setGenerating(true);
     setUsageNote(null);
+    setHealReport(null);
+    setHealError(null);
     try {
       const data = await generateScripts(scanId, {
         additionalCases: additionalCases.trim() || null,
@@ -107,6 +113,45 @@ export function ScriptGenerator() {
       }
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Lanza el healing. Con apply=true persiste y refresca el script en pantalla.
+  const handleHeal = async ({ apply = false } = {}) => {
+    setHealError(null);
+    setHealing(true);
+    try {
+      // En "aplicar" mandamos el healedContent ya revisado (no recomputa el heal).
+      const data = await healScript(scanId, {
+        provider: selectedProvider,
+        apply,
+        healedContent: apply ? healReport?.healedContent : null,
+      });
+      if (apply && data.applied) {
+        // Reflejar el contenido curado sin re-fetch + marcar el reporte como aplicado.
+        setScripts((prev) =>
+          prev.map((s) =>
+            s.framework === 'playwright' ? { ...s, content: data.healedContent } : s,
+          ),
+        );
+        setHealReport((prev) => (prev ? { ...prev, applied: true } : prev));
+      } else {
+        setHealReport(data);
+      }
+    } catch (err) {
+      const status = err?.response?.status;
+      const apiMsg = err?.response?.data?.message;
+      if (status === 404) {
+        setHealError(apiMsg ?? 'No hay script Playwright. Generá los scripts primero.');
+      } else if (status === 502) {
+        setHealError(apiMsg ?? 'No se pudo cargar la URL para verificar los selectores.');
+      } else if (status === 503) {
+        setHealError(apiMsg ?? 'Provider de IA no configurado.');
+      } else {
+        setHealError(apiMsg ?? err?.message ?? 'No se pudo sanar los selectores');
+      }
+    } finally {
+      setHealing(false);
     }
   };
 
@@ -234,6 +279,109 @@ export function ScriptGenerator() {
               <p className="text-sm text-slate-500">No hay script para este framework.</p>
             )}
           </div>
+
+          {active === 'playwright' && activeScript ? (
+            <div className="mt-4 rounded-xl border border-slate-800/70 bg-slate-900/40 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-100">
+                    🩹 Auto-healing de selectores
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Carga la URL en vivo, verifica cada selector y la IA repara los rotos.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={healing}
+                  onClick={() => handleHeal({ apply: false })}
+                  className="rounded-lg border border-emerald-500/40 px-4 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-60"
+                  data-testid="heal-selectors-btn"
+                >
+                  {healing ? 'Verificando…' : 'Sanar selectores'}
+                </button>
+              </div>
+
+              {healError ? (
+                <p className="mt-3 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                  {healError}
+                </p>
+              ) : null}
+
+              {healReport ? (
+                <div className="mt-4" data-testid="heal-report">
+                  <p className="text-xs text-slate-400">
+                    {healReport.checkedCount} selectores verificados ·{' '}
+                    <span className="text-amber-300">{healReport.brokenCount} rotos</span> ·{' '}
+                    <span className="text-emerald-300">{healReport.healedCount} con fix propuesto</span>
+                    {healReport.provider ? ` · ${healReport.provider}` : ''}
+                    {healReport.applied ? ' · ✅ aplicado' : ''}
+                  </p>
+
+                  {healReport.brokenCount === 0 ? (
+                    <p className="mt-2 text-sm text-emerald-300">
+                      Todos los selectores verificables resuelven en la página. No hay nada que sanar.
+                    </p>
+                  ) : (
+                    <>
+                      <ul className="mt-3 space-y-2">
+                        {healReport.report
+                          .filter((r) => r.status === 'curado' || r.status === 'no-resuelto')
+                          .map((r, i) => (
+                            <li
+                              key={i}
+                              className="rounded-md border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs"
+                            >
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={
+                                    r.status === 'curado'
+                                      ? 'rounded-full bg-emerald-500/15 px-2 py-0.5 text-emerald-300'
+                                      : 'rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-300'
+                                  }
+                                >
+                                  {r.status === 'curado' ? `curado · ${r.confidence}` : 'sin fix'}
+                                </span>
+                                <code className="text-slate-400 line-through">{r.raw}</code>
+                              </div>
+                              {r.replacement ? (
+                                <div className="mt-1">
+                                  <code className="text-emerald-300">{r.replacement}</code>
+                                  {r.reason ? (
+                                    <p className="mt-1 text-slate-500">{r.reason}</p>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </li>
+                          ))}
+                      </ul>
+
+                      {healReport.healedCount > 0 && !healReport.applied ? (
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            disabled={healing}
+                            onClick={() => handleHeal({ apply: true })}
+                            className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:opacity-60"
+                            data-testid="heal-apply-btn"
+                          >
+                            {healing ? 'Aplicando…' : `Aplicar ${healReport.healedCount} fix(es)`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setHealReport(null)}
+                            className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-300 hover:border-slate-500"
+                          >
+                            Descartar
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : (
         <p className="mt-8 rounded-lg border border-slate-800 bg-slate-900/50 px-4 py-6 text-sm text-slate-400">

@@ -152,7 +152,7 @@ function resolveProfile(deviceProfileId) {
 }
 
 /** Construye las options de newContext según el device profile elegido. */
-function buildContextOptions(deviceProfileId, storageState) {
+export function buildContextOptions(deviceProfileId, storageState) {
   const profile = resolveProfile(deviceProfileId);
   // Si Playwright tiene un device profile registrado, lo usamos completo
   // (incluye userAgent, deviceScaleFactor, isMobile, hasTouch, etc.).

@@ -156,6 +156,21 @@ export async function getScripts(scanId) {
   return data;
 }
 
+/**
+ * Auto-healing de selectores del script Playwright: el backend carga la URL en
+ * vivo, verifica cada selector y la IA repara los rotos. Con apply=true persiste.
+ * Usa aiApi (180s) porque lanza el browser + LLM.
+ */
+export async function healScript(scanId, { provider, model, apply, healedContent } = {}) {
+  const { data } = await aiApi.post(`/api/scripts/${scanId}/heal`, {
+    provider: provider ?? null,
+    model: model ?? null,
+    apply: apply ?? false,
+    healedContent: healedContent ?? null,
+  });
+  return data;
+}
+
 /** Lista los providers disponibles y cuáles están configurados. */
 export async function getProviders() {
   const { data } = await api.get('/api/scripts/providers');
