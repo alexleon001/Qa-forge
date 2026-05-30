@@ -1,12 +1,23 @@
 // Provider OpenAI — usa response_format: json_schema con strict: true.
-// Model default: gpt-4o-mini (barato y suficiente para esta tarea).
+// Model default: gpt-5.4 (frontier coding a costo medio, mejor seguimiento de
+// los SYSTEM_PROMPT largos de QA Forge que el viejo gpt-4o).
 
 import OpenAI from 'openai';
 
 import { ProviderError, parseJsonOutput } from './base.js';
 
 const PROVIDER_ID = 'openai';
-const DEFAULT_MODEL = process.env.AI_MODEL_OPENAI || 'gpt-4o-mini';
+const DEFAULT_MODEL = process.env.AI_MODEL_OPENAI || 'gpt-5.4';
+
+/**
+ * Los modelos de razonamiento (familia GPT-5.x y o-series) tienen un set de
+ * params distinto al de gpt-4o: exigen `max_completion_tokens` (rechazan el
+ * `max_tokens` deprecado) y NO aceptan `temperature` custom (solo el default).
+ * Detectamos por prefijo para seguir soportando gpt-4o/-mini legacy en paralelo.
+ */
+function isReasoningModel(model) {
+  return /^(gpt-5|o[1-9])/i.test(model);
+}
 
 let clientRef = null;
 function getClient(runtimeApiKey) {
@@ -86,7 +97,7 @@ export const openaiProvider = {
     const client = getClient(apiKey);
     const useModel = model || DEFAULT_MODEL;
     try {
-      const completion = await client.chat.completions.create({
+      const request = {
         model: useModel,
         messages: [
           { role: 'system', content: system },
@@ -100,9 +111,15 @@ export const openaiProvider = {
             schema: sanitizeSchemaForOpenAI(schema),
           },
         },
-        max_tokens: 16_000,
-        temperature: 0.4,
-      });
+      };
+      // Reasoning models (gpt-5.x / o-series) vs. legacy (gpt-4o): distinto set de params.
+      if (isReasoningModel(useModel)) {
+        request.max_completion_tokens = 16_000;
+      } else {
+        request.max_tokens = 16_000;
+        request.temperature = 0.4;
+      }
+      const completion = await client.chat.completions.create(request);
 
       const rawText = completion.choices?.[0]?.message?.content;
       const parsed = parseJsonOutput(PROVIDER_ID, rawText);
