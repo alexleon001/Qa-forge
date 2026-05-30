@@ -440,6 +440,16 @@ ninguna de esas cosas, por eso el split.
 - Recomendado: con `gpt-4o` (no `gpt-4o-mini`) el seguimiento de instrucciones largas
   es notablemente mejor. `AI_MODEL_OPENAI=gpt-4o` en Railway.
 
+> **Modelo default actualizado (2026-05-29)**: el default del provider OpenAI pasó
+> de `gpt-4o-mini` → **`gpt-5.4`** (frontier coding a costo medio, sigue mejor los
+> SYSTEM_PROMPT largos). `openai.provider.js` ahora detecta modelos de razonamiento
+> (`gpt-5.x` / `o-series`) con `isReasoningModel()` y usa `max_completion_tokens`
+> sin `temperature` (los reasoning models rechazan ambos del mundo gpt-4o). gpt-4o
+> legacy sigue funcionando por la misma rama condicional. **Anthropic `claude-sonnet-4-6`
+> queda disponible como opción en el dropdown** (es el `defaultModel` de ese provider).
+> ⚠️ Si Railway tiene `AI_MODEL_OPENAI` seteado (p.ej. `gpt-4o`), ese env **pisa** el
+> default del código — hay que actualizarlo/borrarlo en el dashboard para que tome `gpt-5.4`.
+
 ### FASE 7 — Roadmap acordado (uso personal + equipo chico)
 
 > Pedido del usuario (2026-05-13): construir QA Forge para uso propio + compartir

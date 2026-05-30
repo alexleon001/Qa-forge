@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   createUserApiKey,
   deleteUserApiKey,
+  getProviders,
   listUserApiKeys,
   setUserApiKeyDefault,
 } from '../lib/api.js';
@@ -22,6 +23,9 @@ export function ApiKeys() {
   const [keys, setKeys] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  // Estado live de los providers desde el backend: trae el modelo que corre cada
+  // uno (refleja los overrides AI_MODEL_* del entorno) y cuál es el default activo.
+  const [providerStatus, setProviderStatus] = useState([]);
 
   // Form state
   const [provider, setProvider] = useState('openai');
@@ -46,7 +50,17 @@ export function ApiKeys() {
 
   useEffect(() => {
     reload();
+    getProviders()
+      .then((data) => setProviderStatus(data?.providers ?? []))
+      .catch(() => setProviderStatus([]));
   }, []);
+
+  // Mapa id → modelo que corre, para anotar el dropdown con el modelo real.
+  const modelByProvider = Object.fromEntries(
+    providerStatus.map((p) => [p.id, p.defaultModel]),
+  );
+  // Provider+modelo activo por default en este entorno (lo que corre ahora mismo).
+  const activeProvider = providerStatus.find((p) => p.isDefault);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -99,6 +113,14 @@ export function ApiKeys() {
           Tus keys se guardan cifradas (AES-256-GCM). Solo se muestran los primeros y
           últimos 4 caracteres. Cada provider puede tener varias keys; marcá una como default.
         </p>
+        {activeProvider ? (
+          <p className="mt-3 inline-flex items-center gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            Corriendo ahora en prod:{' '}
+            <strong className="font-semibold">{activeProvider.label}</strong>
+            <span className="font-mono text-emerald-200">{activeProvider.defaultModel}</span>
+          </p>
+        ) : null}
       </header>
 
       <form
@@ -118,7 +140,7 @@ export function ApiKeys() {
             >
               {PROVIDERS.map((p) => (
                 <option key={p.id} value={p.id}>
-                  {p.label}
+                  {modelByProvider[p.id] ? `${p.label} — ${modelByProvider[p.id]}` : p.label}
                 </option>
               ))}
             </select>
