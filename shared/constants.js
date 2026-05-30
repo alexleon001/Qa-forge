@@ -89,7 +89,25 @@ export const SOCKET_EVENT = Object.freeze({
   SCAN_FAILED: 'scan:failed',
   SUBSCRIBE: 'scan:subscribe',
   UNSUBSCRIBE: 'scan:unsubscribe',
+  // AI exploratory testing (sesión independiente, room `explore:<id>`).
+  EXPLORE_SUBSCRIBE: 'explore:subscribe',
+  EXPLORE_UNSUBSCRIBE: 'explore:unsubscribe',
+  EXPLORE_PROGRESS: 'explore:progress',
+  EXPLORE_STEP: 'explore:step',
+  EXPLORE_FINDING: 'explore:finding',
+  EXPLORE_COMPLETED: 'explore:completed',
+  EXPLORE_FAILED: 'explore:failed',
 });
+
+/** AI exploratory testing — límites y vocabularios. */
+export const DEFAULT_EXPLORE_MAX_STEPS = 15;
+export const MAX_EXPLORE_STEPS = 40;
+
+/** Acciones que el agente exploratorio puede pedir en cada paso. */
+export const EXPLORE_ACTIONS = Object.freeze(['click', 'fill', 'navigate', 'back', 'finish']);
+
+/** Severidades de un hallazgo exploratorio (orden de mayor a menor). */
+export const FINDING_SEVERITY = Object.freeze(['critical', 'high', 'medium', 'low', 'info']);
 
 /** Nombre de la queue de BullMQ (no admite `:` en el nombre). */
 export const QUEUE_NAME = 'qa-forge-scan';
