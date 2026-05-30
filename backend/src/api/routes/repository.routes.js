@@ -256,6 +256,26 @@ const actionSchema = z.object({
 const applySchema = z.object({ actions: z.array(actionSchema).min(1).max(100) });
 
 /**
+ * Los modelos en JSON strict mode (OpenAI sanitiza el schema a "todo required +
+ * nullable") devuelven `null` en los campos opcionales que no usan — p.ej.
+ * `caseId: null` en un create, o `testType: null`. Para los schemas de acá un
+ * `null` significa "ausente", no un valor nulo, así que lo descartamos antes de
+ * validar (si no, Zod tira "Expected string, received null"). Recursivo.
+ */
+function dropNulls(value) {
+  if (Array.isArray(value)) return value.map(dropNulls);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v === null) continue;
+      out[k] = dropNulls(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
  * POST /api/repository/suts/:sutId/cases/apply
  * Aplica un lote de acciones create/update/delete en una transacción.
  * Lo usa el frontend tras confirmar las acciones propuestas por el chatbot.
@@ -263,7 +283,7 @@ const applySchema = z.object({ actions: z.array(actionSchema).min(1).max(100) })
 repositoryRouter.post('/suts/:sutId/cases/apply', async (req, res, next) => {
   try {
     const sut = await getSutOr404(req.params.sutId);
-    const parse = applySchema.safeParse(req.body ?? {});
+    const parse = applySchema.safeParse(dropNulls(req.body ?? {}));
     if (!parse.success) {
       throw new HttpError(400, 'INVALID_INPUT', parse.error.errors[0]?.message ?? 'Body inválido');
     }
